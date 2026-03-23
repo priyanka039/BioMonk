@@ -1,4 +1,5 @@
 import { Question, TestResponse } from "@/lib/types";
+import MathText from "@/components/ui/MathText";
 
 interface QuestionViewProps {
     question: Question;
@@ -83,8 +84,9 @@ export default function QuestionView({
                     borderRadius: 8,
                     border: "1px solid var(--border)",
                 }}
-                dangerouslySetInnerHTML={{ __html: question.question_text.replace(/\n/g, "<br/>") }}
-            />
+            >
+                <MathText text={question.question_text} />
+            </div>
 
             {/* Options */}
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -112,7 +114,7 @@ export default function QuestionView({
                         >
                             <div className="option-key">{opt}</div>
                             <p style={{ fontSize: 14.5, color: "var(--text-primary)", lineHeight: 1.5, flex: 1 }}>
-                                {text}
+                                <MathText text={text} />
                             </p>
                             {isCorrect && (
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="2.5">

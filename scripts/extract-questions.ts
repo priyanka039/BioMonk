@@ -100,7 +100,7 @@ function toLetter(n: number): "A" | "B" | "C" | "D" {
   return "D";
 }
 
-type AnswerKeyMode = "dpp_pairs" | "chapter_table" | "parentheses_pairs" | "plain_pairs";
+type AnswerKeyMode = "dpp_pairs" | "chapter_table" | "parentheses_pairs" | "plain_pairs" | "table_format";
 
 function tokenizeNumericLine(line: string): number[] {
   const tokens = line
@@ -126,21 +126,38 @@ function isLikelyQuestionRow(nums: number[]): boolean {
   return min >= 1 && max > 4;
 }
 
+// Header spelling varies in the source PDFs (e.g. "Answer Key" vs "Anwer Key").
+// This regex matches both:
+// - "Answer Key"
+// - "Anwer Key" (missing the "s" after "n")
+const answerKeyHeaderRe = /a\s*n\s*s?\s*w\s*e\s*r\s*key/i;
+
 function parseAnswerKey(fullText: string): {
   answerMap: Map<number, number>;
   answerKeyText: string | null;
   mode: AnswerKeyMode | null;
 } {
-  const m = fullText.match(/answer\s*key/i);
-  if (!m || m.index === undefined) return { answerMap: new Map(), answerKeyText: null, mode: null };
+  const headerMatch = answerKeyHeaderRe.exec(fullText);
+  const headerIdx = headerMatch && headerMatch.index !== undefined ? headerMatch.index : -1;
 
-  const answerKeyText = fullText.slice(m.index);
+  const answerKeyText = headerIdx >= 0 ? fullText.slice(headerIdx) : null;
+  const scanText = answerKeyText ?? fullText;
+
+  // ── Step 1 — Table format (Question/Type/Option/Answer blocks) ────────────
+  // Detect if we can parse 5+ well-formed blocks.
+  const { questions: tableQuestions } = parseTableFormatQuestions(scanText);
+  if (tableQuestions.length >= 5) {
+    return { answerMap: new Map<number, number>(), answerKeyText: scanText, mode: "table_format" };
+  }
+
+  // For the remaining formats, we require an explicit answer-key section.
+  if (!answerKeyText) {
+    return { answerMap: new Map<number, number>(), answerKeyText: null, mode: null };
+  }
+
   const answerMap = new Map<number, number>();
 
-  // ── Step 1 — Parentheses format: "(number)   digit" ───────────────────────
-  // Example:
-  //   (1)   2   (16)   2
-  //   (2)   4   (17)   1
+  // ── Step 2 — Parentheses format: "(number)   digit" ───────────────────────
   // We only switch to this mode when we see at least 3 such pairs.
   const parenRe = /\((\d+)\)\s+([1-4])\b/gm;
   let parenMatch: RegExpExecArray | null;
@@ -158,10 +175,9 @@ function parseAnswerKey(fullText: string): {
     return { answerMap, answerKeyText, mode: "parentheses_pairs" };
   }
 
-  // If parentheses format was not detected, clear and continue with other modes.
   answerMap.clear();
 
-  // ── Step 2 — Plain pairs: "1   2" (one pair per line) ─────────────────────
+  // ── Step 3 — Plain pairs: "1   2" (one pair per line) ─────────────────────
   // Detect at least 5 lines like: /^\s*(\d{1,2})\s+([1-4])\s*$/
   const plainPairRe = /^\s*(\d{1,2})\s+([1-4])\s*$/;
   const answerLines = normalizeText(answerKeyText).split("\n").map((l) => l.trim());
@@ -181,7 +197,7 @@ function parseAnswerKey(fullText: string): {
     return { answerMap, answerKeyText, mode: "plain_pairs" };
   }
 
-  // ── Step 2 — Try chapter-test "two-row table" answer key ──────────────────
+  // ── Step 4 — Try chapter-test "two-row table" answer key ──────────────────
   // Pattern:
   //   <q1 q2 q3 ...>
   //   <a1 a2 a3 ...>   (answers are 1..4)
@@ -215,7 +231,7 @@ function parseAnswerKey(fullText: string): {
     return { answerMap, answerKeyText, mode: "chapter_table" };
   }
 
-  // ── Step 3 — Fallback: alternating pairs ───────────────────────────────────
+  // ── Step 5 — Fallback: alternating pairs ───────────────────────────────────
   // Match pairs anywhere in the grid: "<questionNumber> <answerNumber>"
   // Some PDFs render as "1) 2" (with the ")" attached) so we allow an optional "." or ")"
   const re = /(\d{1,5})\s*[\.\)]?\s+([1-4])\b/gm;
@@ -229,6 +245,79 @@ function parseAnswerKey(fullText: string): {
   }
 
   return { answerMap, answerKeyText, mode: "dpp_pairs" };
+}
+
+function parseTableFormatQuestions(text: string): {
+  questions: ParsedQuestion[];
+  failedBlocks: { question_number: number; reason: string }[];
+} {
+  const placeholder = "Option text not extracted (likely in a table). Refer to the original PDF.";
+  const lines = normalizeText(text)
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  const questions: ParsedQuestion[] = [];
+  const failedBlocks: { question_number: number; reason: string }[] = [];
+
+  let i = 0;
+  let qCounter = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!/^Question\b/i.test(line)) {
+      i++;
+      continue;
+    }
+
+    const qText = line.replace(/^Question\s*/i, "").trim();
+    i++;
+
+    // Skip optional Type line.
+    if (i < lines.length && /^Type\b/i.test(lines[i])) i++;
+
+    const optVals: string[] = [];
+    while (i < lines.length && /^Option\b/i.test(lines[i]) && optVals.length < 4) {
+      const rest = lines[i].replace(/^Option\s*/i, "").trim();
+      optVals.push(rest);
+      i++;
+    }
+
+    // Advance until we hit Answer (or next Question).
+    while (i < lines.length && !/^Answer\b/i.test(lines[i]) && !/^Question\b/i.test(lines[i])) {
+      i++;
+    }
+
+    let ansDigit: number | null = null;
+    if (i < lines.length && /^Answer\b/i.test(lines[i])) {
+      const ansStr = lines[i].replace(/^Answer\s*/i, "").trim();
+      const m = ansStr.match(/([1-4])\b/);
+      ansDigit = m ? Number(m[1]) : null;
+      i++;
+    }
+
+    if (ansDigit === null || ansDigit < 1 || ansDigit > 4) {
+      continue;
+    }
+
+    qCounter++;
+    const option_a = optVals[0] && optVals[0].length > 0 ? optVals[0] : placeholder;
+    const option_b = optVals[1] && optVals[1].length > 0 ? optVals[1] : placeholder;
+    const option_c = optVals[2] && optVals[2].length > 0 ? optVals[2] : placeholder;
+    const option_d = optVals[3] && optVals[3].length > 0 ? optVals[3] : placeholder;
+
+    questions.push({
+      question_number: qCounter,
+      question_text: qText || "Refer to the question text in the original table.",
+      option_a,
+      option_b,
+      option_c,
+      option_d,
+      correct_option: toLetter(ansDigit),
+    });
+  }
+
+  return { questions, failedBlocks };
 }
 
 function parseQuestions(questionSection: string): {
@@ -660,9 +749,22 @@ async function main() {
   let unmatchedQuestionNumbers: number[] = [];
   let totalQuestionBlocksFound = 0;
 
-  if (answerKeyText) {
-    // Parse questions from everything before answer key
-    const questionSection = fullText.slice(0, fullText.search(/answer\s*key/i));
+  if (answerKeyText && answerKeyMode === "table_format") {
+    console.log(`  Answer key mode            : ${answerKeyMode ?? "unknown"}\n`);
+    console.log("  Parsing table-format question blocks...");
+    ({ questions, failedBlocks } = parseTableFormatQuestions(answerKeyText));
+    totalQuestionBlocksFound = questions.length + failedBlocks.length;
+    matched = questions;
+
+    console.log(`  Total question blocks found: ${totalQuestionBlocksFound}`);
+    console.log(`  Parsed question blocks     : ${questions.length}`);
+    console.log(`  Failed question blocks     : ${failedBlocks.length}`);
+    console.log(`  Answer key entries found   : ${answerMap.size}\n`);
+  } else if (answerKeyText) {
+    // Parse questions from everything before answer key section.
+    const headerIdx = fullText.search(answerKeyHeaderRe);
+    const questionSection = headerIdx >= 0 ? fullText.slice(0, headerIdx) : fullText;
+
     console.log("  Parsing questions...");
     ({ questions, failedBlocks } = parseQuestions(questionSection));
 
