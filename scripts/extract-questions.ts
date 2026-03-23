@@ -100,7 +100,7 @@ function toLetter(n: number): "A" | "B" | "C" | "D" {
   return "D";
 }
 
-type AnswerKeyMode = "dpp_pairs" | "chapter_table";
+type AnswerKeyMode = "dpp_pairs" | "chapter_table" | "parentheses_pairs" | "plain_pairs";
 
 function tokenizeNumericLine(line: string): number[] {
   const tokens = line
@@ -137,7 +137,51 @@ function parseAnswerKey(fullText: string): {
   const answerKeyText = fullText.slice(m.index);
   const answerMap = new Map<number, number>();
 
-  // ── Try chapter-test "two-row table" answer key ───────────────────────────
+  // ── Step 1 — Parentheses format: "(number)   digit" ───────────────────────
+  // Example:
+  //   (1)   2   (16)   2
+  //   (2)   4   (17)   1
+  // We only switch to this mode when we see at least 3 such pairs.
+  const parenRe = /\((\d+)\)\s+([1-4])\b/gm;
+  let parenMatch: RegExpExecArray | null;
+  let parenPairsFound = 0;
+
+  while ((parenMatch = parenRe.exec(answerKeyText))) {
+    const q = Number(parenMatch[1]);
+    const a = Number(parenMatch[2]);
+    if (!Number.isFinite(q) || !Number.isFinite(a)) continue;
+    parenPairsFound++;
+    answerMap.set(q, a);
+  }
+
+  if (parenPairsFound >= 3) {
+    return { answerMap, answerKeyText, mode: "parentheses_pairs" };
+  }
+
+  // If parentheses format was not detected, clear and continue with other modes.
+  answerMap.clear();
+
+  // ── Step 2 — Plain pairs: "1   2" (one pair per line) ─────────────────────
+  // Detect at least 5 lines like: /^\s*(\d{1,2})\s+([1-4])\s*$/
+  const plainPairRe = /^\s*(\d{1,2})\s+([1-4])\s*$/;
+  const answerLines = normalizeText(answerKeyText).split("\n").map((l) => l.trim());
+  let plainPairsFound = 0;
+
+  for (const l of answerLines) {
+    const m = l.match(plainPairRe);
+    if (!m) continue;
+    const q = Number(m[1]);
+    const a = Number(m[2]);
+    if (!Number.isFinite(q) || !Number.isFinite(a)) continue;
+    plainPairsFound++;
+    answerMap.set(q, a);
+  }
+
+  if (plainPairsFound >= 5) {
+    return { answerMap, answerKeyText, mode: "plain_pairs" };
+  }
+
+  // ── Step 2 — Try chapter-test "two-row table" answer key ──────────────────
   // Pattern:
   //   <q1 q2 q3 ...>
   //   <a1 a2 a3 ...>   (answers are 1..4)
@@ -171,7 +215,7 @@ function parseAnswerKey(fullText: string): {
     return { answerMap, answerKeyText, mode: "chapter_table" };
   }
 
-  // ── Fallback: DPP "alternating pairs" answer key ───────────────────────────
+  // ── Step 3 — Fallback: alternating pairs ───────────────────────────────────
   // Match pairs anywhere in the grid: "<questionNumber> <answerNumber>"
   // Some PDFs render as "1) 2" (with the ")" attached) so we allow an optional "." or ")"
   const re = /(\d{1,5})\s*[\.\)]?\s+([1-4])\b/gm;
@@ -214,17 +258,21 @@ function parseQuestions(questionSection: string): {
     optLines: Record<1 | 2 | 3 | 4, string[]>;
     activeOpt: 1 | 2 | 3 | 4 | null;
     blockLines: string[];
+    sawOptionMarker: Record<1 | 2 | 3 | 4, boolean>;
   } | null = null;
 
+  function hasSeenAllFourOptions(c: NonNullable<typeof current>): boolean {
+    return c.sawOptionMarker[1] && c.sawOptionMarker[2] && c.sawOptionMarker[3] && c.sawOptionMarker[4];
+  }
+
+  /** Only treat as non-content when the PDF clearly glued multiple markers with no real text. */
   function isJustOptionMarker(s: string): boolean {
     const t = compactSpaces(s);
-    return (
-      t.length > 0 &&
-      (/^\(\s*[1-4]\s*\)$/.test(t) ||
-        /^[1-4]\s*\)$/.test(t) ||
-        /^[1-4]$/.test(t) ||
-        /^\(\s*[1-4]\s*\)\s*\(\s*[1-4]\s*\)$/.test(t))
-    );
+    if (!t.length) return false;
+    // Runs like "(2) (3) (4)" or "2) 3) 4)" with nothing else — not a real answer choice.
+    if (/^(?:\(\s*[1-4]\s*\)|[1-4]\s*\))(?:\s+(?:\(\s*[1-4]\s*\)|[1-4]\s*\)))+$/.test(t)) return true;
+    // Short single-digit / bare-marker answers (e.g. "1", "F", "(2)") are valid; do not strip.
+    return false;
   }
 
   function extractOptionsFallback(blockText: string): Partial<Record<1 | 2 | 3 | 4, string>> {
@@ -250,7 +298,7 @@ function parseQuestions(questionSection: string): {
       const start = cur.i + cur.len;
       const end = next ? next.i : s.length;
       const chunk = compactSpaces(s.slice(start, end));
-      if (chunk && !isJustOptionMarker(chunk)) out[cur.n] = chunk;
+      if (chunk) out[cur.n] = chunk;
     }
 
     return out;
@@ -339,12 +387,39 @@ function parseQuestions(questionSection: string): {
         const optNum = Number(opt[1]) as 1 | 2 | 3 | 4;
         current.blockLines.push(line);
         current.activeOpt = optNum;
+        current.sawOptionMarker[optNum] = true;
         let rest = (opt[2] || "").trim();
         // Sometimes the extracted "rest" is actually just the next marker(s), like "(2) (3) (4)".
         // Treat that as missing so the diagram/table placeholder logic kicks in.
         if (isJustOptionMarker(rest)) rest = "";
         current.optLines[optNum].push(rest);
         continue;
+      }
+
+      // Multi-line options: wrapped formulas continue until the next 1)–4) line or the next question.
+      // If we have not yet seen all four option markers, a line matching qStartRe may be garbled math
+      // (e.g. "2." or "3)") — keep it on the active option. After all four markers exist, qStartRe with
+      // n > current.qNum starts the next question (handled below).
+      if (current.activeOpt) {
+        const optAgainChapter = line.match(optReChapter);
+        const optAgainDpp = optAgainChapter ? null : line.match(optReDpp);
+        if (!optAgainChapter && !optAgainDpp) {
+          const qsMaybe = line.match(qStartRe);
+          if (qsMaybe) {
+            const n = Number(qsMaybe[1]);
+            const allFour = hasSeenAllFourOptions(current);
+            if (!allFour || n <= current.qNum) {
+              current.blockLines.push(line);
+              current.optLines[current.activeOpt].push(line);
+              continue;
+            }
+            // allFour && n > current.qNum — fall through to flush + new question
+          } else {
+            current.blockLines.push(line);
+            current.optLines[current.activeOpt].push(line);
+            continue;
+          }
+        }
       }
     }
 
@@ -360,6 +435,7 @@ function parseQuestions(questionSection: string): {
         optLines: { 1: [], 2: [], 3: [], 4: [] },
         activeOpt: null,
         blockLines: [line],
+        sawOptionMarker: { 1: false, 2: false, 3: false, 4: false },
       };
       const inline = (qs[2] || "").trim();
       if (inline) current.qLines.push(inline);
