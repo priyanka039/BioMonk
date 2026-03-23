@@ -90,6 +90,17 @@ export default async function DashboardPage() {
     const prevScore = completedAttempts?.[1]?.score ?? null;
     const scoreDiff = latestScore !== null && prevScore !== null ? latestScore - prevScore : null;
 
+    // Max marks = number of questions * (+4 per correct)
+    const latestTestId: string | null = completedAttempts?.[0]?.test_id ?? null;
+    const { data: latestQuestionRows } = latestTestId
+        ? await supabase
+            .from("questions")
+            .select("id")
+            .eq("test_id", latestTestId)
+        : { data: [] };
+    const latestQuestionCount = (latestQuestionRows || []).length;
+    const latestMaxMarks = latestQuestionCount > 0 ? latestQuestionCount * 4 : null;
+
     // Syllabus completed
     const totalChapters = chapters?.length || 0;
     const completedChapterIds: string[] = [];
@@ -144,7 +155,7 @@ export default async function DashboardPage() {
                 <StatCard
                     label="Biology Score"
                     value={latestScore !== null ? `${latestScore}` : "—"}
-                    subtext={latestScore !== null ? "out of 360" : "No tests taken yet"}
+                    subtext={latestScore !== null ? `out of ${latestMaxMarks ?? (completedAttempts?.[0]?.test?.total_marks ?? 360)}` : "No tests taken yet"}
                     change={scoreDiff !== null ? `${Math.abs(scoreDiff)} pts` : undefined}
                     changePositive={scoreDiff !== null ? scoreDiff >= 0 : undefined}
                     icon={<ScoreIcon />}

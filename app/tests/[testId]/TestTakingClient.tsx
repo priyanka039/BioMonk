@@ -143,14 +143,34 @@ export default function TestTakingClient({
             }
         }
 
-        await supabase
+        const maxScore = questions.length * (test.marks_correct ?? 4);
+
+        // Persist max_score if the column exists (keeps historical max accurate).
+        const { error: updErr } = await supabase
             .from("test_attempts")
             .update({
                 submitted_at: new Date().toISOString(),
                 score,
+                max_score: maxScore,
                 is_completed: true,
             })
             .eq("id", attemptId);
+
+        if (updErr && /max_score/i.test(updErr.message || "")) {
+            // Column doesn't exist yet — retry without max_score.
+            const { error: updErr2 } = await supabase
+                .from("test_attempts")
+                .update({
+                    submitted_at: new Date().toISOString(),
+                    score,
+                    is_completed: true,
+                })
+                .eq("id", attemptId);
+            if (updErr2) {
+                setSubmitting(false);
+                return;
+            }
+        }
 
         router.push(`/tests/${test.id}/result`);
     }
@@ -190,7 +210,7 @@ export default function TestTakingClient({
                         {[
                             ["Questions", `${questions.length}`],
                             ["Duration", `${test.duration_minutes} minutes`],
-                            ["Total Marks", `${test.total_marks}`],
+                            ["Total Marks", `${questions.length * (test.marks_correct ?? 4)}`],
                             ["Marking Scheme", `+${test.marks_correct} correct, ${test.marks_wrong} wrong`],
                             ["Type", test.type.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())],
                         ].map(([label, value]) => (

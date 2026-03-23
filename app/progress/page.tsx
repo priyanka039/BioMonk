@@ -42,14 +42,31 @@ export default async function ProgressPage() {
 
     // For each attempt, get the responses
     const attemptsWithData = attempts || [];
-    const maxScore = 360; // Full NEET biology score
+
+    // Max marks for a test = number of questions * (+4 per correct).
+    // We compute it from the questions table so it stays correct for DPPs and any other dynamic tests.
+    const testIdsForMarks = attemptsWithData.map((a: any) => a.test_id).filter(Boolean);
+    const { data: questionRows } = testIdsForMarks.length > 0
+        ? await supabase
+            .from("questions")
+            .select("test_id")
+            .in("test_id", testIdsForMarks)
+        : { data: [] };
+
+    const questionCountByTestId: Record<string, number> = {};
+    for (const r of questionRows || []) {
+        questionCountByTestId[r.test_id] = (questionCountByTestId[r.test_id] || 0) + 1;
+    }
 
     // Chart bars - normalize to percentage
     const chartBars = sortedAttempts.map((a: any, i: number) => ({
         label: new Date(a.submitted_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
         score: a.score ?? 0,
-        total: a.test?.total_marks || 360,
-        pct: Math.round(((a.score ?? 0) / (a.test?.total_marks || 360)) * 100),
+        total: (questionCountByTestId[a.test_id] || 0) > 0 ? questionCountByTestId[a.test_id] * 4 : a.test?.total_marks || 0,
+        pct: (() => {
+            const maxMarks = (questionCountByTestId[a.test_id] || 0) > 0 ? questionCountByTestId[a.test_id] * 4 : a.test?.total_marks || 0;
+            return maxMarks ? Math.round(((a.score ?? 0) / maxMarks) * 100) : 0;
+        })(),
         isHighlight: i === sortedAttempts.length - 1,
     }));
 
@@ -117,7 +134,7 @@ export default async function ProgressPage() {
                                     <p style={{ fontFamily: "'Fraunces', serif", fontSize: 18, color: i === sortedAttempts.length - 1 ? "var(--green)" : "var(--text-primary)" }}>
                                         {a.score ?? 0}
                                         <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "'Outfit', sans-serif", fontWeight: 400 }}>
-                                            /{a.test?.total_marks || "—"}
+                                            /{(questionCountByTestId[a.test_id] || 0) > 0 ? questionCountByTestId[a.test_id] * 4 : (a.test?.total_marks || "—")}
                                         </span>
                                     </p>
                                     <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -178,9 +195,11 @@ export default async function ProgressPage() {
                 ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                         {attemptsWithData.slice(0, 6).map((a: any) => {
-                            const pct = a.test?.total_marks
-                                ? Math.round(((a.score ?? 0) / a.test.total_marks) * 100)
-                                : 0;
+                            const maxMarks =
+                                (questionCountByTestId[a.test_id] || 0) > 0
+                                    ? questionCountByTestId[a.test_id] * 4
+                                    : a.test?.total_marks || 0;
+                            const pct = maxMarks ? Math.round(((a.score ?? 0) / maxMarks) * 100) : 0;
                             const color: "green" | "gold" | "red" = pct >= 80 ? "green" : pct >= 60 ? "gold" : "red";
                             return (
                                 <div key={a.id}>
@@ -189,7 +208,7 @@ export default async function ProgressPage() {
                                             {a.test?.title || "Test"}
                                         </span>
                                         <span style={{ fontSize: 12, color: `var(--${color})`, fontWeight: 600 }}>
-                                            {a.score ?? 0}/{a.test?.total_marks || "—"} ({pct}%)
+                                            {a.score ?? 0}/{maxMarks || "—"} ({pct}%)
                                         </span>
                                     </div>
                                     <ProgressBar value={pct} color={color} height={6} />

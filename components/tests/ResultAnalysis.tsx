@@ -34,8 +34,9 @@ export default function ResultAnalysis({
     }
 
     const score = attempt.score ?? 0;
-    const totalMarks = test.total_marks;
-    const pct = Math.round((score / totalMarks) * 100);
+    // Max marks for a test = number of questions * (+4 per correct)
+    const totalMarks = questions.length * (test.marks_correct ?? 4);
+    const pct = totalMarks > 0 ? Math.round((score / totalMarks) * 100) : 0;
 
     let correct = 0, wrong = 0, unattempted = 0;
     for (const q of questions) {

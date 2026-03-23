@@ -92,6 +92,7 @@ export interface TestAttempt {
     started_at: string;
     submitted_at: string | null;
     score: number | null;
+    max_score?: number | null;
     is_completed: boolean;
 }
 

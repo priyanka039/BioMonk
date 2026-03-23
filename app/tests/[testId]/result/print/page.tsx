@@ -51,7 +51,8 @@ export default async function TestResultPrintPage({ params }: Props) {
   for (const r of responses || []) responseMap[r.question_id] = r;
 
   const score = attempt.score ?? 0;
-  const totalMarks = test.total_marks ?? 0;
+  // Max marks for a test = number of questions * (+4 per correct)
+  const totalMarks = (questions || []).length * (test.marks_correct ?? 4);
 
   return (
     <div style={{ background: "#fff", color: "#111", minHeight: "100vh" }}>
