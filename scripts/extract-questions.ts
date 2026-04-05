@@ -100,7 +100,7 @@ function toLetter(n: number): "A" | "B" | "C" | "D" {
   return "D";
 }
 
-type AnswerKeyMode = "dpp_pairs" | "chapter_table" | "parentheses_pairs" | "plain_pairs" | "table_format";
+type AnswerKeyMode = "inline_answer_key" | "dpp_pairs" | "chapter_table" | "parentheses_pairs" | "plain_pairs" | "table_format";
 
 function tokenizeNumericLine(line: string): number[] {
   const tokens = line
@@ -137,6 +137,13 @@ function parseAnswerKey(fullText: string): {
   answerKeyText: string | null;
   mode: AnswerKeyMode | null;
 } {
+  // ── Step 0 — Inline Answer Key format ("Answer key : c" after each question) ──
+  const inlineAnswerKeyRe = /Answer\s*key\s*:\s*[abcd]/gi;
+  const inlineMatches = fullText.match(inlineAnswerKeyRe);
+  if (inlineMatches && inlineMatches.length >= 5) {
+    return { answerMap: new Map<number, number>(), answerKeyText: fullText, mode: "inline_answer_key" };
+  }
+
   const headerMatch = answerKeyHeaderRe.exec(fullText);
   const headerIdx = headerMatch && headerMatch.index !== undefined ? headerMatch.index : -1;
 
@@ -683,6 +690,124 @@ function parseInlineOptionAnswerQuestions(fullText: string): {
   return { questions, failedBlocks };
 }
 
+// ─── Inline Answer Key Parser ─────────────────────────────────────────────────
+// Handles PDFs where each question has its answer embedded immediately after
+// the options in the form: "Answer key : c"  (letter a/b/c/d)
+function parseInlineAnswerKeyQuestions(fullText: string): {
+  questions: ParsedQuestion[];
+  failedBlocks: { question_number: number; reason: string }[];
+} {
+  const questions: ParsedQuestion[] = [];
+  const failedBlocks: { question_number: number; reason: string }[] = [];
+
+  const normalized = normalizeText(fullText);
+
+  // Split text into question blocks by finding lines that start a new question number.
+  // Each block starts at "^\d+\.\s+" and ends before the next such marker.
+  const qBlockRe = /^(\d+)\.\s+/gm;
+  const blockStarts: { index: number; qNum: number }[] = [];
+  let bm: RegExpExecArray | null;
+  while ((bm = qBlockRe.exec(normalized))) {
+    blockStarts.push({ index: bm.index, qNum: Number(bm[1]) });
+  }
+
+  for (let bi = 0; bi < blockStarts.length; bi++) {
+    const { index: start, qNum } = blockStarts[bi];
+    const end = bi + 1 < blockStarts.length ? blockStarts[bi + 1].index : normalized.length;
+    const block = normalized.slice(start, end);
+
+    // ── Extract answer (a→A, b→B, c→C, d→D) ─────────────────────────────────
+    const answerRe = /Answer\s*key\s*:\s*([abcd])/i;
+    const answerMatch = block.match(answerRe);
+    if (!answerMatch) {
+      failedBlocks.push({ question_number: qNum, reason: "No 'Answer key' found in block" });
+      continue;
+    }
+    const correct_option = answerMatch[1].toUpperCase() as "A" | "B" | "C" | "D";
+
+    // ── Slice away answer key and trailing lines (Correct Marks / Wrong Marks) ─
+    const answerLineIdx = block.indexOf(answerMatch[0]);
+    const questionBody = block.slice(0, answerLineIdx);
+
+    // ── Find where option (a) begins ──────────────────────────────────────────
+    const firstOptRe = /\(a\)/i;
+    const firstOptMatch = questionBody.match(firstOptRe);
+    const firstOptIdx = firstOptMatch ? questionBody.indexOf(firstOptMatch[0]) : -1;
+
+    // Question text is everything before (a)
+    const rawQText = firstOptIdx >= 0 ? questionBody.slice(0, firstOptIdx) : questionBody;
+    // Strip the leading question number  (e.g. "1.  ")
+    const question_text = compactSpaces(rawQText.replace(/^\d+\.\s*/, ""));
+
+    // ── Extract options using a regex that handles same-line pairs ────────────
+    // We look for (a) … (b) … (c) … (d) in sequence, grabbing text between markers.
+    // The regex allows options to share a line: "(a) Foo   (b) Bar"
+    const optionSectionRaw = firstOptIdx >= 0 ? questionBody.slice(firstOptIdx) : "";
+    // Flatten to single-space so same-line options are easy to split.
+    const optionSection = optionSectionRaw.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+
+    // Capture groups between option markers.
+    // Pattern:  (a) <text-until-(b)>  (b) <text-until-(c)>  (c) <text-until-(d)>  (d) <rest>
+    const optRe = /\(a\)\s*(.*?)\s*\(b\)\s*(.*?)\s*\(c\)\s*(.*?)\s*\(d\)\s*(.*)/i;
+    const optMatch = optionSection.match(optRe);
+
+    let option_a = "";
+    let option_b = "";
+    let option_c = "";
+    let option_d = "";
+
+    if (optMatch) {
+      option_a = compactSpaces(optMatch[1]);
+      option_b = compactSpaces(optMatch[2]);
+      option_c = compactSpaces(optMatch[3]);
+      option_d = compactSpaces(optMatch[4]);
+    } else {
+      // Partial fallback: try to grab whatever is available.
+      const partial = [
+        { label: "a", re: /\(a\)\s*(.*?)(?=\([bcds]\)|$)/i },
+        { label: "b", re: /\(b\)\s*(.*?)(?=\([cds]\)|$)/i },
+        { label: "c", re: /\(c\)\s*(.*?)(?=\([ds]\)|$)/i },
+        { label: "d", re: /\(d\)\s*(.*?)(?=$)/i },
+      ];
+      const vals: string[] = partial.map(({ re }) => {
+        const m = optionSection.match(re);
+        return m ? compactSpaces(m[1]) : "";
+      });
+      [option_a, option_b, option_c, option_d] = vals;
+    }
+
+    const placeholder = "Option text not extracted (likely in a figure/table). Refer to the original PDF.";
+    const missing: string[] = [];
+    if (!option_a) { option_a = placeholder; missing.push("a"); }
+    if (!option_b) { option_b = placeholder; missing.push("b"); }
+    if (!option_c) { option_c = placeholder; missing.push("c"); }
+    if (!option_d) { option_d = placeholder; missing.push("d"); }
+
+    if (missing.length > 0) {
+      failedBlocks.push({
+        question_number: qNum,
+        reason: `Option text missing for (${missing.join(",")}); inserted placeholders`,
+      });
+    }
+
+    if (!question_text) {
+      failedBlocks.push({ question_number: qNum, reason: "Question text missing in PDF extract" });
+    }
+
+    questions.push({
+      question_number: qNum,
+      question_text: question_text || "Refer to the figure/diagram in the original PDF.",
+      option_a,
+      option_b,
+      option_c,
+      option_d,
+      correct_option,
+    });
+  }
+
+  return { questions, failedBlocks };
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
   const subjectNormalized = (subject || "").toLowerCase().trim();
@@ -749,7 +874,18 @@ async function main() {
   let unmatchedQuestionNumbers: number[] = [];
   let totalQuestionBlocksFound = 0;
 
-  if (answerKeyText && answerKeyMode === "table_format") {
+  if (answerKeyMode === "inline_answer_key") {
+    console.log(`  Answer key mode            : ${answerKeyMode}\n`);
+    console.log("  Parsing inline-answer-key question blocks...");
+    ({ questions, failedBlocks } = parseInlineAnswerKeyQuestions(fullText));
+    totalQuestionBlocksFound = questions.length + failedBlocks.length;
+    matched = questions; // answers already embedded
+
+    console.log(`  Total question blocks found: ${totalQuestionBlocksFound}`);
+    console.log(`  Parsed question blocks     : ${questions.length}`);
+    console.log(`  Failed question blocks     : ${failedBlocks.length}`);
+    console.log(`  Answer key entries found   : (inline)\n`);
+  } else if (answerKeyText && answerKeyMode === "table_format") {
     console.log(`  Answer key mode            : ${answerKeyMode ?? "unknown"}\n`);
     console.log("  Parsing table-format question blocks...");
     ({ questions, failedBlocks } = parseTableFormatQuestions(answerKeyText));
