@@ -762,12 +762,35 @@ function parseInlineAnswerKeyQuestions(fullText: string): {
   let currentQText = "";
   let currentOpts: string[] = [];
 
+  // Words that grammatically CANNOT end a sentence — if the question text's
+  // last word is one of these, the next line is a continuation of the question.
+  const definiteDanglers = new Set([
+    "in", "on", "at", "by", "of", "to", "for", "from", "with", "into",
+    "under", "over", "about", "between", "among", "through", "around",
+    "within", "without", "a", "an", "the",
+  ]);
+
   for (const line of contentLines) {
     if (state === "expecting_question") {
       currentQText = line;
       currentOpts = [];
       state = "collecting_options";
     } else {
+      // ── Multi-line question text detection ──────────────────────────────────
+      // Only treat this line as question text continuation when ALL of:
+      //   1. No options collected yet
+      //   2. The question text's last word is a definite dangler (cannot end a sentence)
+      //   3. The line has no tab / 3+ spaces  (those are always option pair markers)
+      if (currentOpts.length === 0) {
+        const lastWord = currentQText.trimEnd().split(/\s+/).pop()
+          ?.toLowerCase().replace(/[^a-z]/g, "") ?? "";
+        const lineIsOptionPair = /\t|\s{3,}/.test(line);
+        if (definiteDanglers.has(lastWord) && !lineIsOptionPair) {
+          currentQText = currentQText + " " + line;
+          continue;
+        }
+      }
+
       const parts = splitOptLine(line);
       for (const p of parts) currentOpts.push(p);
 
