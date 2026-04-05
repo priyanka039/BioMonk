@@ -690,9 +690,16 @@ function parseInlineOptionAnswerQuestions(fullText: string): {
   return { questions, failedBlocks };
 }
 
-// ─── Inline Answer Key Parser ─────────────────────────────────────────────────
-// Handles PDFs where each question has its answer embedded immediately after
-// the options in the form: "Answer key : c"  (letter a/b/c/d)
+// ─── Inline Answer Key Parser (interleaved per-page layout) ──────────────────
+// The PDF text interleaves structural marker lines with actual content per page:
+//   Marker lines: "N."  "(a)\t(b)"  "(c)\t(d)"  "Answer key : X"  "Correct/Wrong Marks : ..."
+//   Content lines: actual question text + option values (appear after the markers on each page)
+//
+// Strategy — single pass over all lines:
+//   • If line matches "Answer key : [abcd]"  → push to answers array
+//   • If line is a structural marker          → skip
+//   • Otherwise                              → it's a content line (question text or option value)
+// Then group content lines into (1 question text + 4 option values) blocks, zip with answers.
 function parseInlineAnswerKeyQuestions(fullText: string): {
   questions: ParsedQuestion[];
   failedBlocks: { question_number: number; reason: string }[];
@@ -701,87 +708,104 @@ function parseInlineAnswerKeyQuestions(fullText: string): {
   const failedBlocks: { question_number: number; reason: string }[] = [];
 
   const normalized = normalizeText(fullText);
+  const allLines = normalized.split("\n");
 
-  // Split text into question blocks by finding lines that start a new question number.
-  // Each block starts at "^\d+\.\s+" and ends before the next such marker.
-  const qBlockRe = /^(\d+)\.\s+/gm;
-  const blockStarts: { index: number; qNum: number }[] = [];
-  let bm: RegExpExecArray | null;
-  while ((bm = qBlockRe.exec(normalized))) {
-    blockStarts.push({ index: bm.index, qNum: Number(bm[1]) });
-  }
+  const answers: ("A" | "B" | "C" | "D")[] = [];
+  const contentLines: string[] = [];
 
-  for (let bi = 0; bi < blockStarts.length; bi++) {
-    const { index: start, qNum } = blockStarts[bi];
-    const end = bi + 1 < blockStarts.length ? blockStarts[bi + 1].index : normalized.length;
-    const block = normalized.slice(start, end);
+  for (const rawLine of allLines) {
+    const line = rawLine.trim();
+    if (!line) continue;
 
-    // ── Extract answer (a→A, b→B, c→C, d→D) ─────────────────────────────────
-    const answerRe = /Answer\s*key\s*:\s*([abcd])/i;
-    const answerMatch = block.match(answerRe);
-    if (!answerMatch) {
-      failedBlocks.push({ question_number: qNum, reason: "No 'Answer key' found in block" });
+    // ── Structural marker lines → skip (but collect answers) ──────────────────
+    // "Answer key : c"
+    const ansMatch = line.match(/^Answer\s*key\s*:\s*([abcd])\s*$/i);
+    if (ansMatch) {
+      answers.push(ansMatch[1].toUpperCase() as "A" | "B" | "C" | "D");
       continue;
     }
-    const correct_option = answerMatch[1].toUpperCase() as "A" | "B" | "C" | "D";
+    // "N."  (question number marker — just a digit+period alone on the line)
+    if (/^\d+\.\s*$/.test(line)) continue;
+    // "(a)  (b)"  or  "(a)" — option letter markers (possibly with tab, no real text)
+    if (/^\(([abcd])\)(\s*\t\s*\(([abcd])\))?\s*$/i.test(line)) continue;
+    // "(a)   (b)" — tab-separated pair of option letters only
+    if (/^\([abcd]\)\s+\([abcd]\)\s*$/i.test(line)) continue;
+    // "Correct Marks : ..."  /  "Wrong Marks : ..."
+    if (/^(Correct|Wrong)\s*Marks\s*:/i.test(line)) continue;
+    // Page header/footer: "-- N of 18 --"
+    if (/^--\s*\d+\s*of\s*\d+\s*--/.test(line)) continue;
+    // Section header: "Section: Biology" / "Biology Class XI ..."
+    if (/^(Section\s*:|Biology Class|Instructions|Sections:)/i.test(line)) continue;
 
-    // ── Slice away answer key and trailing lines (Correct Marks / Wrong Marks) ─
-    const answerLineIdx = block.indexOf(answerMatch[0]);
-    const questionBody = block.slice(0, answerLineIdx);
+    // Everything else is a content line (question text or option value)
+    contentLines.push(line);
+  }
 
-    // ── Find where option (a) begins ──────────────────────────────────────────
-    const firstOptRe = /\(a\)/i;
-    const firstOptMatch = questionBody.match(firstOptRe);
-    const firstOptIdx = firstOptMatch ? questionBody.indexOf(firstOptMatch[0]) : -1;
+  if (answers.length === 0) {
+    return { questions, failedBlocks };
+  }
 
-    // Question text is everything before (a)
-    const rawQText = firstOptIdx >= 0 ? questionBody.slice(0, firstOptIdx) : questionBody;
-    // Strip the leading question number  (e.g. "1.  ")
-    const question_text = compactSpaces(rawQText.replace(/^\d+\.\s*/, ""));
+  // ── Split a content line into 1 or 2 option values ────────────────────────
+  // A tab or 3+ spaces in the middle indicates a side-by-side option pair.
+  // e.g.  "Class\torder"  →  ["Class", "order"]
+  // e.g.  "Mutual exclusive events"  →  ["Mutual exclusive events"]
+  function splitOptLine(line: string): string[] {
+    const parts = line.split(/\t|\s{3,}/).map((p) => p.trim()).filter(Boolean);
+    return parts.length >= 2 ? parts.slice(0, 2) : [line];
+  }
 
-    // ── Extract options using a regex that handles same-line pairs ────────────
-    // We look for (a) … (b) … (c) … (d) in sequence, grabbing text between markers.
-    // The regex allows options to share a line: "(a) Foo   (b) Bar"
-    const optionSectionRaw = firstOptIdx >= 0 ? questionBody.slice(firstOptIdx) : "";
-    // Flatten to single-space so same-line options are easy to split.
-    const optionSection = optionSectionRaw.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+  // ── State machine: (1 question text line) + (option lines until 4 values) ──
+  type QBlock = { qText: string; opts: string[] };
+  const blocks: QBlock[] = [];
 
-    // Capture groups between option markers.
-    // Pattern:  (a) <text-until-(b)>  (b) <text-until-(c)>  (c) <text-until-(d)>  (d) <rest>
-    const optRe = /\(a\)\s*(.*?)\s*\(b\)\s*(.*?)\s*\(c\)\s*(.*?)\s*\(d\)\s*(.*)/i;
-    const optMatch = optionSection.match(optRe);
+  let state: "expecting_question" | "collecting_options" = "expecting_question";
+  let currentQText = "";
+  let currentOpts: string[] = [];
 
-    let option_a = "";
-    let option_b = "";
-    let option_c = "";
-    let option_d = "";
-
-    if (optMatch) {
-      option_a = compactSpaces(optMatch[1]);
-      option_b = compactSpaces(optMatch[2]);
-      option_c = compactSpaces(optMatch[3]);
-      option_d = compactSpaces(optMatch[4]);
+  for (const line of contentLines) {
+    if (state === "expecting_question") {
+      currentQText = line;
+      currentOpts = [];
+      state = "collecting_options";
     } else {
-      // Partial fallback: try to grab whatever is available.
-      const partial = [
-        { label: "a", re: /\(a\)\s*(.*?)(?=\([bcds]\)|$)/i },
-        { label: "b", re: /\(b\)\s*(.*?)(?=\([cds]\)|$)/i },
-        { label: "c", re: /\(c\)\s*(.*?)(?=\([ds]\)|$)/i },
-        { label: "d", re: /\(d\)\s*(.*?)(?=$)/i },
-      ];
-      const vals: string[] = partial.map(({ re }) => {
-        const m = optionSection.match(re);
-        return m ? compactSpaces(m[1]) : "";
-      });
-      [option_a, option_b, option_c, option_d] = vals;
-    }
+      const parts = splitOptLine(line);
+      for (const p of parts) currentOpts.push(p);
 
-    const placeholder = "Option text not extracted (likely in a figure/table). Refer to the original PDF.";
+      if (currentOpts.length >= 4) {
+        blocks.push({ qText: currentQText, opts: currentOpts.slice(0, 4) });
+        currentQText = "";
+        currentOpts = [];
+        state = "expecting_question";
+      }
+    }
+  }
+
+  // Flush any remaining partial block
+  if (state === "collecting_options" && currentQText) {
+    while (currentOpts.length < 4) currentOpts.push("");
+    blocks.push({ qText: currentQText, opts: currentOpts.slice(0, 4) });
+  }
+
+  // ── Zip answers ↔ blocks by index ─────────────────────────────────────────
+  const numQ = Math.min(answers.length, blocks.length);
+  const placeholder = "Option text not extracted (likely in a figure/table). Refer to the original PDF.";
+
+  for (let i = 0; i < numQ; i++) {
+    const qNum = i + 1;
+    const correct_option = answers[i];
+    const { qText, opts } = blocks[i];
+
+    const question_text = compactSpaces(qText) || "Refer to the figure/diagram in the original PDF.";
+    const option_a = compactSpaces(opts[0]) || placeholder;
+    const option_b = compactSpaces(opts[1]) || placeholder;
+    const option_c = compactSpaces(opts[2]) || placeholder;
+    const option_d = compactSpaces(opts[3]) || placeholder;
+
     const missing: string[] = [];
-    if (!option_a) { option_a = placeholder; missing.push("a"); }
-    if (!option_b) { option_b = placeholder; missing.push("b"); }
-    if (!option_c) { option_c = placeholder; missing.push("c"); }
-    if (!option_d) { option_d = placeholder; missing.push("d"); }
+    if (option_a === placeholder) missing.push("a");
+    if (option_b === placeholder) missing.push("b");
+    if (option_c === placeholder) missing.push("c");
+    if (option_d === placeholder) missing.push("d");
 
     if (missing.length > 0) {
       failedBlocks.push({
@@ -790,13 +814,9 @@ function parseInlineAnswerKeyQuestions(fullText: string): {
       });
     }
 
-    if (!question_text) {
-      failedBlocks.push({ question_number: qNum, reason: "Question text missing in PDF extract" });
-    }
-
     questions.push({
       question_number: qNum,
-      question_text: question_text || "Refer to the figure/diagram in the original PDF.",
+      question_text,
       option_a,
       option_b,
       option_c,
@@ -805,8 +825,17 @@ function parseInlineAnswerKeyQuestions(fullText: string): {
     });
   }
 
+  if (answers.length !== blocks.length) {
+    console.warn(
+      `  ⚠ Answer count (${answers.length}) ≠ content blocks (${blocks.length}). ` +
+        `Only ${numQ} questions will be inserted.`
+    );
+  }
+
   return { questions, failedBlocks };
 }
+
+
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
