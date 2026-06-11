@@ -5,6 +5,7 @@ import StatCard from "@/components/dashboard/StatCard";
 import BatchProgress from "@/components/dashboard/BatchProgress";
 import ScheduleWidget from "@/components/dashboard/ScheduleWidget";
 import { getDaysUntilNEET, SCHEDULE_EVENTS } from "@/lib/config";
+import { fetchErrorBookEntries } from "@/lib/error-book";
 import Link from "next/link";
 import type { Metadata } from "next";
 
@@ -52,6 +53,16 @@ function FileIcon() {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
             <polyline points="14 2 14 8 20 8" />
+        </svg>
+    );
+}
+function ErrorBookIcon() {
+    return (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            <line x1="9" y1="8" x2="15" y2="8" />
+            <line x1="9" y1="12" x2="13" y2="12" />
         </svg>
     );
 }
@@ -120,6 +131,16 @@ export default async function DashboardPage() {
     // Days until NEET
     const daysLeft = getDaysUntilNEET();
 
+    let errorBookUnresolved = 0;
+    let errorBookTotal = 0;
+    try {
+        const errorBookEntries = await fetchErrorBookEntries(supabase, user.id, "all");
+        errorBookTotal = errorBookEntries.length;
+        errorBookUnresolved = errorBookEntries.filter((e) => !e.resolved_at).length;
+    } catch {
+        // Table may not exist until migration is applied
+    }
+
     // Recent materials (coming soon placeholder data)
     const { data: recentMaterials } = await supabase
         .from("study_materials")
@@ -183,6 +204,71 @@ export default async function DashboardPage() {
                     accentColor="var(--red)"
                 />
             </div>
+
+            <Link href="/error-book" style={{ textDecoration: "none", display: "block", marginBottom: 24 }}>
+                <div
+                    className="card"
+                    style={{
+                        padding: "20px 24px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 20,
+                        border: errorBookUnresolved > 0 ? "1px solid rgba(224,82,82,0.25)" : "1px solid var(--border)",
+                        background: errorBookUnresolved > 0 ? "rgba(224,82,82,0.04)" : "var(--surface)",
+                        cursor: "pointer",
+                        transition: "border-color 0.15s",
+                    }}
+                >
+                    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                        <div
+                            style={{
+                                width: 44,
+                                height: 44,
+                                borderRadius: 10,
+                                background: "rgba(224,82,82,0.12)",
+                                border: "1px solid rgba(224,82,82,0.2)",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                color: "var(--red)",
+                                flexShrink: 0,
+                            }}
+                        >
+                            <ErrorBookIcon />
+                        </div>
+                        <div>
+                            <h3 style={{ fontFamily: "'Fraunces', serif", fontSize: 16, color: "var(--text-primary)", marginBottom: 4 }}>
+                                Error Book
+                            </h3>
+                            <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                                {errorBookTotal > 0
+                                    ? `${errorBookUnresolved} question${errorBookUnresolved === 1 ? "" : "s"} to review · ${errorBookTotal} total saved`
+                                    : "Wrong answers from your tests are saved here for revision"}
+                            </p>
+                        </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+                        {errorBookUnresolved > 0 && (
+                            <span
+                                style={{
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    color: "var(--red)",
+                                    background: "rgba(224,82,82,0.12)",
+                                    padding: "4px 10px",
+                                    borderRadius: 99,
+                                }}
+                            >
+                                {errorBookUnresolved} to review
+                            </span>
+                        )}
+                        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--green)" }}>
+                            Open →
+                        </span>
+                    </div>
+                </div>
+            </Link>
 
             {/* Mid section: batch progress + schedule */}
             <div

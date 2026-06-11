@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
+import { syncErrorBookFromAttempt } from "@/lib/error-book";
 import { Test, Question, TestAttempt, TestResponse } from "@/lib/types";
 import ExamTimer from "@/components/tests/ExamTimer";
 import QuestionView from "@/components/tests/QuestionView";
@@ -171,6 +172,15 @@ export default function TestTakingClient({
                 return;
             }
         }
+
+        await syncErrorBookFromAttempt(
+            supabase,
+            userId,
+            attemptId,
+            test.id,
+            questions,
+            responses
+        );
 
         router.push(`/tests/${test.id}/result`);
     }

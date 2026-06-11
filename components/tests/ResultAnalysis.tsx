@@ -158,6 +158,9 @@ export default function ResultAnalysis({
                     <Link href="/tests" className="btn btn-ghost" style={{ textDecoration: "none" }}>
                         All Tests
                     </Link>
+                    <Link href="/dashboard" className="btn btn-primary" style={{ textDecoration: "none" }}>
+                        Dashboard
+                    </Link>
                 </div>
             </div>
 
