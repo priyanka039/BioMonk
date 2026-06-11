@@ -8,6 +8,7 @@
 
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
+import { unwrapSupabaseRelation } from "../lib/error-book";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -44,7 +45,7 @@ async function main() {
         }
 
         for (const response of responses ?? []) {
-            const question = response.question as { correct_option: string } | null;
+            const question = unwrapSupabaseRelation(response.question);
             if (!question || response.selected_option === question.correct_option) {
                 continue;
             }

@@ -22,6 +22,12 @@ export async function isErrorBookTableReady(supabase: SupabaseClient): Promise<b
 
 type ResponseLike = Record<string, { selected_option: string | null }>;
 
+/** Supabase joins may type many-to-one relations as T or T[] depending on generated types. */
+export function unwrapSupabaseRelation<T>(value: T | T[] | null | undefined): T | null {
+    if (value == null) return null;
+    return Array.isArray(value) ? (value[0] ?? null) : value;
+}
+
 export async function syncErrorBookFromAttempt(
     supabase: SupabaseClient,
     studentId: string,
@@ -86,11 +92,11 @@ export async function backfillStudentErrorBook(
 
         const rows = (responses ?? [])
             .filter((r) => {
-                const question = r.question as { correct_option: string } | null;
+                const question = unwrapSupabaseRelation(r.question);
                 return question && r.selected_option !== question.correct_option;
             })
             .map((r) => {
-                const question = r.question as { correct_option: string };
+                const question = unwrapSupabaseRelation(r.question)!;
                 return {
                     student_id: studentId,
                     question_id: r.question_id,
@@ -158,7 +164,7 @@ async function fetchErrorBookEntriesFromResponses(
             .single();
 
         for (const response of responses ?? []) {
-            const question = response.question as Question | null;
+            const question = unwrapSupabaseRelation(response.question) as Question | null;
             if (!question || response.selected_option === question.correct_option) continue;
             if (seen.has(question.id)) continue;
             seen.add(question.id);
