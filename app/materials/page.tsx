@@ -32,6 +32,7 @@ export default async function MaterialsPage() {
     const { data: materials } = await supabase
         .from("study_materials")
         .select("*, chapter:chapters(name, class_level)")
+        .is("deleted_at", null)
         .order("created_at", { ascending: false });
 
     return (

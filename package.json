@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "extract-questions": "npx ts-node --project tsconfig.scripts.json scripts/extract-questions.ts",
-    "extract-questions-docx": "npx ts-node --project tsconfig.scripts.json scripts/extract-questions-docx.ts"
+    "extract-questions-docx": "npx ts-node --project tsconfig.scripts.json scripts/extract-questions-docx.ts",
+    "restore-backup": "npx tsx scripts/restore-backup.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",
@@ -33,6 +36,7 @@
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.9"
   }
 }

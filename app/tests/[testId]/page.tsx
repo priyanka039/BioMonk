@@ -31,12 +31,35 @@ export default async function TestTakingPage({ params }: Props) {
 
     if (!test || !test.is_active) notFound();
 
-    // Fetch questions
-    const { data: questions } = await supabase
+    // Check for existing attempt first — a resumed attempt must keep showing the
+    // exact version the student started, even if the admin re-extracted since.
+    const { data: existingAttempt } = await supabase
+        .from("test_attempts")
+        .select("*")
+        .eq("student_id", user.id)
+        .eq("test_id", testId)
+        .maybeSingle();
+
+    // Determine which version's questions to show.
+    const { data: currentVersion } = await supabase
+        .from("test_versions")
+        .select("id")
+        .eq("test_id", testId)
+        .eq("is_current", true)
+        .maybeSingle();
+
+    const versionId: string | null =
+        existingAttempt?.test_version_id ?? currentVersion?.id ?? null;
+
+    // Fetch questions for the resolved version. Legacy tests (no versions) have
+    // null test_version_id — fall back to all questions for the test.
+    let questionsQuery = supabase
         .from("questions")
         .select("*")
         .eq("test_id", testId)
         .order("order_index");
+    if (versionId) questionsQuery = questionsQuery.eq("test_version_id", versionId);
+    const { data: questions } = await questionsQuery;
 
     if (!questions || questions.length === 0) {
         return (
@@ -52,14 +75,6 @@ export default async function TestTakingPage({ params }: Props) {
             </div>
         );
     }
-
-    // Check for existing attempt
-    const { data: existingAttempt } = await supabase
-        .from("test_attempts")
-        .select("*")
-        .eq("student_id", user.id)
-        .eq("test_id", testId)
-        .maybeSingle();
 
     // If already completed, redirect to result
     if (existingAttempt?.is_completed) {
@@ -93,6 +108,7 @@ export default async function TestTakingPage({ params }: Props) {
             existingAttempt={existingAttempt}
             existingResponses={existingResponses}
             remainingSeconds={remainingSeconds}
+            testVersionId={versionId}
         />
     );
 }

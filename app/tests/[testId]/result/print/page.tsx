@@ -36,11 +36,15 @@ export default async function TestResultPrintPage({ params }: Props) {
     .single();
   if (!attempt) redirect(`/tests/${testId}`);
 
-  const { data: questions } = await supabase
+  let questionsQuery = supabase
     .from("questions")
     .select("*")
     .eq("test_id", testId)
     .order("order_index");
+  if (attempt.test_version_id) {
+    questionsQuery = questionsQuery.eq("test_version_id", attempt.test_version_id);
+  }
+  const { data: questions } = await questionsQuery;
 
   const { data: responses } = await supabase
     .from("test_responses")

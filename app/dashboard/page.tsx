@@ -145,6 +145,7 @@ export default async function DashboardPage() {
     const { data: recentMaterials } = await supabase
         .from("study_materials")
         .select("*, chapter:chapters(name)")
+        .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(3);
 

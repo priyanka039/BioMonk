@@ -1,7 +1,38 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { SESSION_COOKIE, verifyToken } from "@/lib/admin-session";
 
 export async function middleware(request: NextRequest) {
+    const { pathname } = request.nextUrl;
+
+    // Internal + public API helpers — no auth redirect (they handle their own).
+    if (
+        pathname.startsWith("/api/storage/resolve-material") ||
+        pathname.startsWith("/api/health") ||
+        pathname.startsWith("/api/cron")
+    ) {
+        return NextResponse.next();
+    }
+
+    // Admin routes — gated by the signed admin cookie, NOT the student session.
+    if (pathname.startsWith("/admin")) {
+        const token = request.cookies.get(SESSION_COOKIE)?.value;
+        const session = await verifyToken(
+            token,
+            process.env.ADMIN_SESSION_SECRET ?? ""
+        );
+        const isLoginPage = pathname === "/admin";
+
+        if (session && isLoginPage) {
+            return NextResponse.redirect(new URL("/admin/materials", request.url));
+        }
+        if (!session && !isLoginPage) {
+            return NextResponse.redirect(new URL("/admin", request.url));
+        }
+        return NextResponse.next();
+    }
+
+    // ─── Student (Supabase) auth for everything else ─────────
     let supabaseResponse = NextResponse.next({ request });
 
     const supabase = createServerClient(
@@ -9,9 +40,13 @@ export async function middleware(request: NextRequest) {
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
         {
             cookies: {
-                getAll() { return request.cookies.getAll(); },
+                getAll() {
+                    return request.cookies.getAll();
+                },
                 setAll(cookiesToSet) {
-                    cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+                    cookiesToSet.forEach(({ name, value }) =>
+                        request.cookies.set(name, value)
+                    );
                     supabaseResponse = NextResponse.next({ request });
                     cookiesToSet.forEach(({ name, value, options }) =>
                         supabaseResponse.cookies.set(name, value, options)
@@ -21,27 +56,15 @@ export async function middleware(request: NextRequest) {
         }
     );
 
-    const { data: { user } } = await supabase.auth.getUser();
-    const { pathname } = request.nextUrl;
+    const {
+        data: { user },
+    } = await supabase.auth.getUser();
 
-    // Allow internal API helpers without auth redirect (they still run server-side)
-    if (pathname.startsWith("/api/storage/resolve-material")) {
-        return supabaseResponse;
-    }
-
-    // Public routes
     if (pathname === "/login") {
         if (user) return NextResponse.redirect(new URL("/dashboard", request.url));
         return supabaseResponse;
     }
 
-    // Admin route — checked separately (same session, checked by email in page)
-    if (pathname.startsWith("/admin")) {
-        if (!user) return NextResponse.redirect(new URL("/login", request.url));
-        return supabaseResponse;
-    }
-
-    // All other protected routes
     if (!user) {
         return NextResponse.redirect(new URL("/login", request.url));
     }

@@ -27,6 +27,7 @@ export default async function TestsPage() {
         .from("tests")
         .select("*, chapter:chapters(*)")
         .eq("is_active", true)
+        .is("deleted_at", null)
         .order("scheduled_at", { ascending: false, nullsFirst: false });
 
     // Fetch student's attempts

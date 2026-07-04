@@ -18,6 +18,7 @@ interface TestTakingClientProps {
     existingAttempt: TestAttempt | null;
     existingResponses: TestResponse[];
     remainingSeconds: number;
+    testVersionId?: string | null;
 }
 
 type ResponseState = Record<string, { selected_option: string | null; is_marked_for_review: boolean }>;
@@ -29,6 +30,7 @@ export default function TestTakingClient({
     existingAttempt,
     existingResponses,
     remainingSeconds,
+    testVersionId = null,
 }: TestTakingClientProps) {
     const router = useRouter();
     const supabase = createClient();
@@ -58,16 +60,29 @@ export default function TestTakingClient({
     // Begin the test
     async function handleBegin() {
         setStarting(true);
-        const { data, error } = await supabase
+        const attemptPayload: Record<string, unknown> = {
+            student_id: userId,
+            test_id: test.id,
+            started_at: new Date().toISOString(),
+            is_completed: false,
+        };
+        if (testVersionId) attemptPayload.test_version_id = testVersionId;
+
+        let { data, error } = await supabase
             .from("test_attempts")
-            .insert({
-                student_id: userId,
-                test_id: test.id,
-                started_at: new Date().toISOString(),
-                is_completed: false,
-            })
+            .insert(attemptPayload)
             .select()
             .single();
+
+        // If the test_version_id column isn't present yet, retry without it.
+        if (error && /test_version_id/i.test(error.message || "")) {
+            delete attemptPayload.test_version_id;
+            ({ data, error } = await supabase
+                .from("test_attempts")
+                .insert(attemptPayload)
+                .select()
+                .single());
+        }
 
         if (error || !data) {
             setStarting(false);

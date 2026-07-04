@@ -38,12 +38,17 @@ export default async function TestResultPage({ params }: Props) {
 
     if (!attempt) redirect(`/tests/${testId}`);
 
-    // Fetch questions
-    const { data: questions } = await supabase
+    // Fetch questions for the exact version the student took (so re-extractions
+    // never change a past result). Legacy attempts have no version → all.
+    let questionsQuery = supabase
         .from("questions")
         .select("*")
         .eq("test_id", testId)
         .order("order_index");
+    if (attempt.test_version_id) {
+        questionsQuery = questionsQuery.eq("test_version_id", attempt.test_version_id);
+    }
+    const { data: questions } = await questionsQuery;
 
     // Fetch responses
     const { data: responses } = await supabase
