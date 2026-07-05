@@ -155,9 +155,9 @@ In Supabase Table Editor:
 
 **batches** table:
 ```
-name: "Champion's Batch 2026"
-start_date: 2025-06-01
-end_date: 2026-05-03
+name: "NEET 2027"
+start_date: 2026-06-01
+end_date: 2027-05-02
 is_active: true
 ```
 

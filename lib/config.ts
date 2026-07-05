@@ -1,6 +1,6 @@
 import { ScheduleEvent } from "./types";
 
-export const NEET_2026_DATE = new Date("2026-05-03");
+export const NEET_2027_DATE = new Date("2027-05-02");
 
 export const MENTOR_NAME = "Vicky Vaswani";
 
@@ -37,6 +37,6 @@ export const SCHEDULE_EVENTS: ScheduleEvent[] = [
 
 export function getDaysUntilNEET(): number {
     const today = new Date();
-    const diff = NEET_2026_DATE.getTime() - today.getTime();
+    const diff = NEET_2027_DATE.getTime() - today.getTime();
     return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
 }

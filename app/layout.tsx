@@ -4,8 +4,8 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "BioMonk — NEET Biology Platform",
   description:
-    "BioMonk is an advanced NEET Biology learning platform by Vicky Vaswani. Study, practice, and track your progress for NEET 2026.",
-  keywords: ["NEET", "Biology", "BioMonk", "Vicky Vaswani", "NEET 2026", "Coaching"],
+    "BioMonk is an advanced NEET Biology learning platform by Vicky Vaswani. Study, practice, and track your progress for NEET 2027.",
+  keywords: ["NEET", "Biology", "BioMonk", "Vicky Vaswani", "NEET 2027", "Coaching"],
 };
 
 export default function RootLayout({

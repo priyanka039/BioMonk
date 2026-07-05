@@ -200,7 +200,7 @@ export default async function DashboardPage() {
                 <StatCard
                     label="Days Until NEET"
                     value={daysLeft}
-                    subtext="NEET 2026 — May 3"
+                    subtext="NEET 2027 — May 2"
                     icon={<CalendarIcon />}
                     accentColor="var(--red)"
                 />
