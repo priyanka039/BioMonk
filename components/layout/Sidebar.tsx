@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { Profile, Batch } from "@/lib/types";
+import BioMonkLogo from "@/components/BioMonkLogo";
 
 interface NavItem {
     href: string;
@@ -122,11 +123,12 @@ export default function Sidebar({ profile, batch }: SidebarProps) {
 
     return (
         <aside
+            className="app-sidebar"
             style={{
                 width: 228,
                 minHeight: "100vh",
                 background: "var(--surface)",
-                borderRight: "1px solid var(--border)",
+                borderRight: "1px solid var(--border-soft)",
                 display: "flex",
                 flexDirection: "column",
                 position: "fixed",
@@ -136,43 +138,8 @@ export default function Sidebar({ profile, batch }: SidebarProps) {
                 zIndex: 50,
             }}
         >
-            {/* Logo */}
-            <div
-                style={{
-                    padding: "20px 20px 16px",
-                    borderBottom: "1px solid var(--border)",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                }}
-            >
-                <div
-                    style={{
-                        width: 36,
-                        height: 36,
-                        background: "var(--green)",
-                        borderRadius: 9,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                    }}
-                >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10" />
-                        <path d="M12 8v4l3 3" />
-                        <path d="M20 2c-2 4-6 6-8 8" />
-                    </svg>
-                </div>
-                <span
-                    style={{
-                        fontFamily: "'Fraunces', serif",
-                        fontSize: 18,
-                        fontWeight: 700,
-                        color: "var(--text-primary)",
-                    }}
-                >
-                    Bio<span style={{ color: "var(--green)" }}>Monk</span>
-                </span>
+            <div className="sidebar-logo">
+                <BioMonkLogo variant="compact" tone="on-dark" height={34} href="/dashboard" />
             </div>
 
             {/* Nav */}
@@ -266,7 +233,7 @@ export default function Sidebar({ profile, batch }: SidebarProps) {
                         justifyContent: "center",
                         fontSize: 12,
                         fontWeight: 700,
-                        color: "var(--green)",
+                        color: "var(--purple-300)",
                         flexShrink: 0,
                     }}
                 >

@@ -3,7 +3,7 @@
 type Kind = "success" | "error" | "info" | "warning";
 
 const STYLES: Record<Kind, { color: string; bg: string; border: string }> = {
-    success: { color: "var(--green)", bg: "rgba(43,191,120,0.09)", border: "rgba(43,191,120,0.25)" },
+    success: { color: "var(--purple-400)", bg: "rgba(123,44,191,0.12)", border: "rgba(157,78,221,0.28)" },
     error: { color: "var(--red)", bg: "rgba(224,82,82,0.08)", border: "rgba(224,82,82,0.25)" },
     warning: { color: "var(--gold)", bg: "rgba(224,156,44,0.09)", border: "rgba(224,156,44,0.25)" },
     info: { color: "var(--blue)", bg: "rgba(74,156,224,0.09)", border: "rgba(74,156,224,0.25)" },

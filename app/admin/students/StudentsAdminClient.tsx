@@ -113,7 +113,7 @@ export default function StudentsAdminClient({
             <div className="card" style={{ overflow: "hidden" }}>
                 {data.items.length === 0 ? (
                     <div style={{ padding: "48px 24px", textAlign: "center", color: "var(--text-muted)" }}>
-                        No students yet — click <strong style={{ color: "var(--text-secondary)" }}>Add Student</strong> to enroll one.
+                        No students yet — click <strong style={{ color: "var(--text-secondary)" }}>Add Student</strong> to enroll your first student in a batch.
                     </div>
                 ) : (
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>

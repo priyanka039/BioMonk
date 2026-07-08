@@ -37,7 +37,7 @@ export async function getTestFormData() {
         const supa = getAdminClient();
         const [batches, chapters] = await Promise.all([
             supa.from("batches").select("id, name").order("name"),
-            supa.from("chapters").select("id, name, class_level").order("order_index"),
+            supa.from("chapters").select("id, name, class_level, batch_id").order("order_index"),
         ]);
         return ok({ batches: batches.data || [], chapters: chapters.data || [] });
     });
@@ -172,6 +172,18 @@ export async function createTest(
                 duplicate: true,
                 error: `A test named "${title}" already exists in this batch. Create another one anyway?`,
             };
+        }
+
+        if (input.chapter_id) {
+            const { data: ch } = await supa
+                .from("chapters")
+                .select("batch_id")
+                .eq("id", input.chapter_id)
+                .maybeSingle();
+            if (!ch) return { success: false, error: "Chapter not found." };
+            if (ch.batch_id !== input.batch_id) {
+                return { success: false, error: "That chapter belongs to a different batch." };
+            }
         }
 
         const { data: inserted, error } = await supa

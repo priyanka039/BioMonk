@@ -10,14 +10,7 @@ function SearchIcon() {
         </svg>
     );
 }
-function BellIcon() {
-    return (
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-        </svg>
-    );
-}
+import NotificationBell from "./NotificationBell";
 
 interface TopbarProps {
     pageTitle: string;
@@ -37,8 +30,9 @@ export default function Topbar({ pageTitle, onSearch }: TopbarProps) {
         <header
             style={{
                 height: 58,
-                background: "var(--surface)",
-                borderBottom: "1px solid var(--border)",
+                background: "rgba(28, 15, 58, 0.72)",
+                backdropFilter: "blur(12px)",
+                borderBottom: "1px solid var(--border-soft)",
                 display: "flex",
                 alignItems: "center",
                 padding: "0 24px",
@@ -48,10 +42,8 @@ export default function Topbar({ pageTitle, onSearch }: TopbarProps) {
                 zIndex: 40,
             }}
         >
-            {/* Page title */}
             <h1
                 style={{
-                    fontFamily: "'Fraunces', serif",
                     fontSize: 17,
                     fontWeight: 600,
                     color: "var(--text-primary)",
@@ -90,33 +82,7 @@ export default function Topbar({ pageTitle, onSearch }: TopbarProps) {
                 </div>
             </div>
 
-            {/* Notification bell */}
-            <button
-                style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "var(--text-secondary)",
-                    padding: 8,
-                    borderRadius: 6,
-                    transition: "background 0.15s",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                }}
-                onMouseEnter={(e) =>
-                ((e.target as HTMLElement).closest("button")!.style.background =
-                    "var(--surface-2)")
-                }
-                onMouseLeave={(e) =>
-                ((e.target as HTMLElement).closest("button")!.style.background =
-                    "none")
-                }
-                aria-label="Notifications"
-                id="notification-bell"
-            >
-                <BellIcon />
-            </button>
+            <NotificationBell />
         </header>
     );
 }

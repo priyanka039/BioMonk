@@ -6,6 +6,10 @@ export const metadata: Metadata = {
   description:
     "BioMonk is an advanced NEET Biology learning platform by Vicky Vaswani. Study, practice, and track your progress for NEET 2027.",
   keywords: ["NEET", "Biology", "BioMonk", "Vicky Vaswani", "NEET 2027", "Coaching"],
+  icons: {
+    icon: "/biomonk-icon.png",
+    apple: "/biomonk-icon.png",
+  },
 };
 
 export default function RootLayout({

@@ -151,7 +151,11 @@ Or use the API: `POST /api/admin/create-student` with body:
 
 ## Setting Up Batches & Chapters
 
-In Supabase Table Editor:
+Use **Admin → Batches** to create a batch (e.g. NEET 2027), set the **NEET exam date** (`end_date` drives the student countdown), and open the batch dashboard for a quick overview.
+
+Use **Admin → Chapters** to add syllabus chapters per batch and **lock** chapters you have not released yet (locked = hidden from students).
+
+Alternatively, in Supabase Table Editor:
 
 **batches** table:
 ```

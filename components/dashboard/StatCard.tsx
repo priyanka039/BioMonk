@@ -15,7 +15,7 @@ export default function StatCard({
     change,
     changePositive,
     icon,
-    accentColor = "var(--green)",
+    accentColor = "var(--brand-light)",
 }: StatCardProps) {
     return (
         <div
@@ -44,8 +44,8 @@ export default function StatCard({
                         style={{
                             fontSize: 11,
                             fontWeight: 600,
-                            color: changePositive ? "var(--green)" : "var(--red)",
-                            background: changePositive ? "rgba(43,191,120,0.1)" : "rgba(224,82,82,0.1)",
+                            color: changePositive ? "var(--purple-300)" : "var(--red)",
+                            background: changePositive ? "var(--brand-subtle)" : "rgba(240, 112, 112, 0.12)",
                             padding: "2px 8px",
                             borderRadius: 99,
                         }}

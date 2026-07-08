@@ -10,6 +10,7 @@ import QuestionView from "@/components/tests/QuestionView";
 import QuestionNavigator from "@/components/tests/QuestionNavigator";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
+import BioMonkLogo from "@/components/BioMonkLogo";
 
 interface TestTakingClientProps {
     test: Test;
@@ -217,11 +218,8 @@ export default function TestTakingClient({
                     style={{ maxWidth: 500, width: "100%", padding: 40 }}
                 >
                     {/* Logo */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 28 }}>
-                        <div style={{ width: 32, height: 32, background: "var(--green)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10" /><path d="M12 8v4l3 3" /><path d="M20 2c-2 4-6 6-8 8" /></svg>
-                        </div>
-                        <span style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 16 }}>BioMonk</span>
+                    <div style={{ marginBottom: 28 }}>
+                        <BioMonkLogo variant="compact" tone="on-dark" height={32} />
                     </div>
 
                     <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: 22, marginBottom: 8 }}>
@@ -275,7 +273,7 @@ export default function TestTakingClient({
                         id="begin-test-btn"
                         style={{
                             width: "100%",
-                            background: "var(--green)",
+                            background: "var(--brand-gradient)",
                             border: "none",
                             borderRadius: "var(--btn-radius)",
                             color: "#fff",

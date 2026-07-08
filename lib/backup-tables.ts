@@ -2,6 +2,8 @@
 
 // Tables included in the weekly JSON backup.
 export const BACKUP_TABLES = [
+    "batches",
+    "chapters",
     "profiles",
     "tests",
     "test_versions",
@@ -9,10 +11,13 @@ export const BACKUP_TABLES = [
     "test_attempts",
     "test_responses",
     "study_materials",
+    "announcements",
 ] as const;
 
 // FK-safe order for restore (parents before children).
 export const RESTORE_ORDER: readonly string[] = [
+    "batches",
+    "chapters",
     "profiles",
     "study_materials",
     "tests",
@@ -20,6 +25,7 @@ export const RESTORE_ORDER: readonly string[] = [
     "questions",
     "test_attempts",
     "test_responses",
+    "announcements",
 ];
 
 export const BACKUP_DIR = "backups";

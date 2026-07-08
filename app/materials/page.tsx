@@ -22,24 +22,32 @@ export default async function MaterialsPage() {
 
     const batch = profile?.batch ?? null;
 
-    // Fetch all chapters (do not filter by batch_id)
-    const { data: chapters } = await supabase
+    // Fetch chapters — exclude locked (coach controls visibility per batch)
+    const { data: chaptersRaw } = await supabase
         .from("chapters")
         .select("*")
+        .eq("is_locked", false)
         .order("order_index");
 
-    // Fetch all study materials (no batch-related filtering)
-    const { data: materials } = await supabase
+    const chapters = chaptersRaw || [];
+
+    // Fetch study materials for unlocked chapters only
+    const { data: materialsRaw } = await supabase
         .from("study_materials")
-        .select("*, chapter:chapters(name, class_level)")
+        .select("*, chapter:chapters(name, class_level, is_locked)")
         .is("deleted_at", null)
         .order("created_at", { ascending: false });
+
+    const materials = (materialsRaw || []).filter((m) => {
+        const ch = Array.isArray(m.chapter) ? m.chapter[0] : m.chapter;
+        return !ch?.is_locked;
+    });
 
     return (
         <AppShell pageTitle="Study Material" profile={profile} batch={batch}>
             <MaterialsBrowser
-                chapters={chapters || []}
-                materials={materials || []}
+                chapters={chapters}
+                materials={materials}
             />
         </AppShell>
     );

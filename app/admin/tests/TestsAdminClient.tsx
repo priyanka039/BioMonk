@@ -19,7 +19,7 @@ import {
 } from "../actions/tests";
 
 type Batch = { id: string; name: string };
-type Chapter = { id: string; name: string; class_level: string };
+type Chapter = { id: string; name: string; class_level: string; batch_id?: string };
 type Page = { items: TestRow[]; total: number; page: number };
 
 const DRAFT_KEY = "biomonk_test_draft";
@@ -78,8 +78,16 @@ export default function TestsAdminClient({
     }, [form]);
 
     function set<K extends keyof typeof form>(key: K, value: string) {
-        setForm((f) => ({ ...f, [key]: value }));
+        setForm((f) => {
+            const next = { ...f, [key]: value };
+            if (key === "batch_id") next.chapter_id = "";
+            return next;
+        });
     }
+
+    const batchChapters = chapters.filter(
+        (c) => !form.batch_id || c.batch_id === form.batch_id
+    );
 
     async function refresh(page = data.page, q = search) {
         const res = await getTests(page, q);
@@ -272,9 +280,9 @@ export default function TestsAdminClient({
                     </div>
                     <div style={{ flex: 1 }}>
                         <FormField label="Chapter (optional)" htmlFor="t-chapter">
-                            <select id="t-chapter" className="input-base" value={form.chapter_id} onChange={(e) => set("chapter_id", e.target.value)}>
+                            <select id="t-chapter" className="input-base" value={form.chapter_id} onChange={(e) => set("chapter_id", e.target.value)} disabled={!form.batch_id}>
                                 <option value="">—</option>
-                                {chapters.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.class_level})</option>)}
+                                {batchChapters.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.class_level})</option>)}
                             </select>
                         </FormField>
                     </div>

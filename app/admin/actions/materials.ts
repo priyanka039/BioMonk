@@ -23,14 +23,16 @@ export interface MaterialRow {
     chapter?: { name: string } | null;
 }
 
-export async function getChapters() {
+export async function getChapters(batchId?: string) {
     return run(async () => {
         await assertAdmin();
         const supa = getAdminClient();
-        const { data, error } = await supa
+        let query = supa
             .from("chapters")
-            .select("id, name, class_level")
+            .select("id, name, class_level, batch_id")
             .order("order_index");
+        if (batchId) query = query.eq("batch_id", batchId);
+        const { data, error } = await query;
         if (error) return fail(error.message);
         return ok(data || []);
     });

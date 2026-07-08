@@ -4,7 +4,9 @@ import AppShell from "@/components/layout/AppShell";
 import StatCard from "@/components/dashboard/StatCard";
 import BatchProgress from "@/components/dashboard/BatchProgress";
 import ScheduleWidget from "@/components/dashboard/ScheduleWidget";
-import { getDaysUntilNEET, SCHEDULE_EVENTS } from "@/lib/config";
+import { getDaysUntilDate, SCHEDULE_EVENTS } from "@/lib/config";
+import { formatDate } from "@/lib/format";
+import { fetchAnnouncements } from "@/lib/announcements";
 import { fetchErrorBookEntries } from "@/lib/error-book";
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -128,8 +130,20 @@ export default async function DashboardPage() {
             ? Math.round((completedChapterIds.length / totalChapters) * 100)
             : 0;
 
-    // Days until NEET
-    const daysLeft = getDaysUntilNEET();
+    // Days until NEET (from batch exam date set by coach)
+    const daysLeft = getDaysUntilDate(batch?.end_date);
+    const examSubtext = batch?.end_date
+        ? `${batch.name} — ${formatDate(batch.end_date)}`
+        : "Ask your coach to set your batch exam date";
+
+    let highAnnouncement: { id: string; title: string; body: string } | null = null;
+    try {
+        const announcements = await fetchAnnouncements(supabase, user.id);
+        const unreadHigh = announcements.find((a) => a.priority === "high" && !a.read);
+        if (unreadHigh) highAnnouncement = unreadHigh;
+    } catch {
+        /* migration 007 may not be applied yet */
+    }
 
     let errorBookUnresolved = 0;
     let errorBookTotal = 0;
@@ -155,10 +169,32 @@ export default async function DashboardPage() {
             profile={profile}
             batch={batch}
         >
+            {/* High-priority announcement banner */}
+            {highAnnouncement && (
+                <div
+                    className="card"
+                    style={{
+                        padding: "16px 20px",
+                        marginBottom: 20,
+                        border: "1px solid rgba(224,82,82,0.3)",
+                        background: "rgba(224,82,82,0.06)",
+                    }}
+                >
+                    <p style={{ fontSize: 11, fontWeight: 700, color: "var(--red)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                        Important announcement
+                    </p>
+                    <p style={{ fontWeight: 600, fontSize: 15, color: "var(--text-primary)" }}>{highAnnouncement.title}</p>
+                    <p style={{ fontSize: 13.5, color: "var(--text-secondary)", marginTop: 6, lineHeight: 1.5 }}>{highAnnouncement.body}</p>
+                </div>
+            )}
+
             {/* Greeting */}
             <div style={{ marginBottom: 28 }}>
-                <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 24, fontWeight: 700, color: "var(--text-primary)" }}>
-                    Good day, {profile?.full_name?.split(" ")[0] || "Student"}
+                <h2 style={{ fontSize: 26, fontWeight: 700, color: "var(--text-primary)", letterSpacing: "-0.02em" }}>
+                    Good day,{" "}
+                    <span style={{ color: "var(--purple-300)" }}>
+                        {profile?.full_name?.split(" ")[0] || "Student"}
+                    </span>
                 </h2>
                 <p style={{ color: "var(--text-muted)", fontSize: 14, marginTop: 4 }}>
                     Here is your progress summary for {batch?.name || "your batch"}.
@@ -199,8 +235,8 @@ export default async function DashboardPage() {
                 />
                 <StatCard
                     label="Days Until NEET"
-                    value={daysLeft}
-                    subtext="NEET 2027 — May 2"
+                    value={batch?.end_date ? daysLeft : "—"}
+                    subtext={examSubtext}
                     icon={<CalendarIcon />}
                     accentColor="var(--red)"
                 />

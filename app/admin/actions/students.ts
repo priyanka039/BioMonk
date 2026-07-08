@@ -22,16 +22,8 @@ export interface StudentRow {
 }
 
 export async function getBatches() {
-    return run(async () => {
-        await assertAdmin();
-        const supa = getAdminClient();
-        const { data, error } = await supa
-            .from("batches")
-            .select("id, name, is_active")
-            .order("name");
-        if (error) return fail(error.message);
-        return ok(data || []);
-    });
+    const { getBatchesList } = await import("./batches");
+    return getBatchesList();
 }
 
 export async function getStudents(page = 1, search = "") {

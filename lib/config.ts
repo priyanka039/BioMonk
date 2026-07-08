@@ -1,7 +1,5 @@
 import { ScheduleEvent } from "./types";
 
-export const NEET_2027_DATE = new Date("2027-05-02");
-
 export const MENTOR_NAME = "Vicky Vaswani";
 
 export const SCHEDULE_EVENTS: ScheduleEvent[] = [
@@ -35,8 +33,14 @@ export const SCHEDULE_EVENTS: ScheduleEvent[] = [
     },
 ];
 
-export function getDaysUntilNEET(): number {
+/** Days until a date string (YYYY-MM-DD) or Date. Returns 0 if past/missing. */
+export function getDaysUntilDate(value: string | Date | null | undefined): number {
+    if (!value) return 0;
+    const target = value instanceof Date ? value : new Date(value + "T00:00:00");
+    if (Number.isNaN(target.getTime())) return 0;
     const today = new Date();
-    const diff = NEET_2027_DATE.getTime() - today.getTime();
+    today.setHours(0, 0, 0, 0);
+    target.setHours(0, 0, 0, 0);
+    const diff = target.getTime() - today.getTime();
     return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
 }

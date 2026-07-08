@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import Modal from "@/components/ui/Modal";
 import Tag from "@/components/ui/Tag";
 import AlertBanner from "@/components/admin/AlertBanner";
@@ -11,12 +11,14 @@ import Pagination from "@/components/admin/Pagination";
 import { formatDate } from "@/lib/format";
 import {
     getMaterials,
+    getChapters,
     uploadStudyMaterial,
     archiveMaterial,
     type MaterialRow,
 } from "../actions/materials";
 
-type Chapter = { id: string; name: string; class_level: string };
+type Chapter = { id: string; name: string; class_level: string; batch_id?: string };
+type Batch = { id: string; name: string; is_active: boolean };
 type Page = { items: MaterialRow[]; total: number; page: number };
 
 const TYPE_META: Record<string, { label: string; variant: "green" | "gold" | "red" | "blue" }> = {
@@ -29,9 +31,11 @@ const TYPE_META: Record<string, { label: string; variant: "green" | "gold" | "re
 export default function MaterialsAdminClient({
     initial,
     chapters,
+    batches,
 }: {
     initial: Page;
     chapters: Chapter[];
+    batches: Batch[];
 }) {
     const [data, setData] = useState<Page>(initial);
     const [search, setSearch] = useState("");
@@ -40,9 +44,16 @@ export default function MaterialsAdminClient({
     const [uploadOpen, setUploadOpen] = useState(false);
     const [title, setTitle] = useState("");
     const [type, setType] = useState("notes");
+    const [batchId, setBatchId] = useState("");
     const [chapterId, setChapterId] = useState("");
+    const [allChapters, setAllChapters] = useState(chapters);
     const [formError, setFormError] = useState("");
     const fileRef = useRef<HTMLInputElement>(null);
+
+    const filteredChapters = useMemo(
+        () => (batchId ? allChapters.filter((c) => c.batch_id === batchId) : allChapters),
+        [allChapters, batchId]
+    );
 
     const [dupConfirm, setDupConfirm] = useState<{ open: boolean; msg: string } | null>(null);
     const [archiveTarget, setArchiveTarget] = useState<MaterialRow | null>(null);
@@ -55,9 +66,23 @@ export default function MaterialsAdminClient({
     function resetForm() {
         setTitle("");
         setType("notes");
+        setBatchId("");
         setChapterId("");
         setFormError("");
         if (fileRef.current) fileRef.current.value = "";
+    }
+
+    async function onBatchChange(bid: string) {
+        setBatchId(bid);
+        setChapterId("");
+        if (bid) {
+            const res = await getChapters(bid);
+            if (res.success && res.data) setAllChapters((prev) => {
+                const ids = new Set(res.data!.map((c) => c.id));
+                const rest = prev.filter((c) => !ids.has(c.id));
+                return [...rest, ...res.data!];
+            });
+        }
     }
 
     async function doUpload(allowDuplicate: boolean) {
@@ -190,10 +215,18 @@ export default function MaterialsAdminClient({
                         <option value="formula_sheet">Formula Sheet</option>
                     </select>
                 </FormField>
+                <FormField label="Batch" htmlFor="mat-batch">
+                    <select id="mat-batch" className="input-base" value={batchId} onChange={(e) => onBatchChange(e.target.value)}>
+                        <option value="">Select a batch…</option>
+                        {batches.map((b) => (
+                            <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                    </select>
+                </FormField>
                 <FormField label="Chapter" htmlFor="mat-chapter">
-                    <select id="mat-chapter" className="input-base" value={chapterId} onChange={(e) => setChapterId(e.target.value)}>
+                    <select id="mat-chapter" className="input-base" value={chapterId} onChange={(e) => setChapterId(e.target.value)} disabled={!batchId}>
                         <option value="">Select a chapter…</option>
-                        {chapters.map((c) => (
+                        {filteredChapters.map((c) => (
                             <option key={c.id} value={c.id}>{c.name} ({c.class_level})</option>
                         ))}
                     </select>
