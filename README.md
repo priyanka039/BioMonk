@@ -1,112 +1,175 @@
-# BioMonk LMS — Student Portal
+# BioMonk LMS
 
-A production-ready Learning Management System for BioMonk, a NEET Biology coaching platform by **Vicky Vaswani**.
+A production-ready Learning Management System for **BioMonk** — NEET Biology coaching by **Vicky Vaswani**.
+
+- **Students:** study materials, timed tests, progress, error book, batch announcements
+- **Coach:** password-protected admin panel at `/admin` (no Supabase dashboard needed for day-to-day work)
 
 ---
 
-## Setup
+## Quick start (local)
 
-### 1. Environment Variables
+```powershell
+# 1. Copy env template and fill in values
+copy .env.local.example .env.local
 
+# 2. Install & run
+npm install
+node .\node_modules\next\dist\bin\next dev --webpack
+
+# 3. Open http://localhost:3000
 ```
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
-SUPABASE_SERVICE_ROLE_KEY=eyJ...     ← only needed for the extract script
+
+---
+
+## Environment variables
+
+All **7** are required for production (admin panel + backups + storage):
+
+| Variable | Purpose |
+|----------|---------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Client / student auth |
+| `SUPABASE_SERVICE_ROLE_KEY` | Admin actions, backups, storage |
+| `ADMIN_EMAIL` | Seeds the **first** admin only (see note below) |
+| `ADMIN_PASSWORD` | Seeds the **first** admin only |
+| `ADMIN_SESSION_SECRET` | Signs the admin session cookie (long random hex) |
+| `CRON_SECRET` | Protects `/api/cron/backup` |
+
+Generate secrets (PowerShell):
+
+```powershell
+-join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
 ```
 
-### 2. Database
+**Important — admin login uses the database, not env vars every time.**
 
-Run `supabase/migrations/001_initial.sql` in your Supabase project → **SQL Editor**.
-Then run `supabase/migrations/002_patch.sql` as well.
+`ADMIN_EMAIL` / `ADMIN_PASSWORD` only create the first row in `admin_users` when that table is empty. After that, login and password changes are stored in Supabase. Changing Vercel env vars does **not** change the live admin email or password.
 
-### 3. Storage Bucket
+To check the current admin:
 
-In Supabase → Storage → **New Bucket**:
+```sql
+select email, created_at, last_login_at from admin_users;
+```
+
+To switch email: update the row in SQL, or delete the row and log in again (bootstrap recreates from env).
+
+---
+
+## Database migrations
+
+Run in **Supabase → SQL Editor**, in order:
+
+| # | File | What it adds |
+|---|------|----------------|
+| 1 | `001_initial.sql` | Core tables, RLS, auth trigger |
+| 2 | `002_patch.sql` | `created_at` patches |
+| 3 | `003_add_max_score_to_test_attempts.sql` | Historical score accuracy |
+| 4 | `004_error_book.sql` | Error book + auto-sync on test submit |
+| 5 | `005_admin_panel.sql` | Admin users, audit logs, soft deletes, test versions |
+| 6 | `006_repair_dropped_tables.sql` | Repair only if 005 failed / tables missing |
+| 7 | `007_batch_control.sql` | Announcements, read tracking, batch test guard |
+
+**Verify all migrations ran:**
+
+```sql
+select '001' as m, case when exists (select 1 from information_schema.tables where table_name = 'batches') then 'ok' else 'missing' end
+union all select '004', case when exists (select 1 from information_schema.tables where table_name = 'error_book_entries') then 'ok' else 'missing' end
+union all select '005', case when exists (select 1 from information_schema.tables where table_name = 'admin_users') then 'ok' else 'missing' end
+union all select '007', case when exists (select 1 from information_schema.tables where table_name = 'announcements') then 'ok' else 'missing' end;
+```
+
+---
+
+## Storage
+
+Supabase → Storage → **New bucket**
+
 - Name: `study-material-bucket`
 - Public: **OFF** (private)
 
-This bucket holds all your PDFs (notes AND question papers).
+Used for study PDFs and weekly JSON backups.
 
 ---
 
-## How to Add Study Materials (PDFs)
+## Deploy to Vercel
 
-> Students go to `/materials` and see all uploaded PDFs. They can preview the full PDF in-browser and download it.
+1. Push `main` to GitHub (`priyanka039/BioMonk`)
+2. [Vercel](https://vercel.com) → import the repo (or redeploy existing project)
+3. **Settings → Environment Variables** — add all 7 vars above (Production + Preview)
+4. Deploy
 
-**Step 1** — Upload the PDF to Supabase Storage:
-1. Open your Supabase project → Storage → `study-material-bucket`
-2. Create a folder if you want (e.g. `cell-biology/`) — optional but organized
-3. Upload the PDF file (drag from Google Drive on your desktop after downloading)
-4. Note the file path shown (e.g. `cell-biology/chapter-notes.pdf`)
+`vercel.json` configures a weekly backup cron (Mondays 03:00 UTC) → `/api/cron/backup`.
 
-**Step 2** — Add the record to the database:
-1. Table Editor → `study_materials` → **Insert row**
-2. Fill in:
-   | Column | Value |
-   |--------|-------|
-   | `chapter_id` | UUID of the chapter from the `chapters` table |
-   | `title` | e.g. "Cell Biology — Chapter Notes" |
-   | `type` | one of: `notes` `mindmap` `pyq` `formula_sheet` |
-   | `file_path` | exact path from Step 1, e.g. `cell-biology/chapter-notes.pdf` |
-   | `file_size_kb` | file size in KB (right-click file → Properties) |
-   | `page_count` | number of pages in the PDF |
-
-Students will see it immediately on refresh.
-
----
-
-## How to Add Tests with Questions (from a PDF)
-
-> Students go to `/tests`, take the test, and get scored automatically.
-
-### Method A — Extract from a PDF on your computer
-
-You have a PDF of questions (from Google Drive, downloaded to your PC).
-
-**Step 1** — Create the test in Supabase:
-1. Table Editor → `tests` → **Insert row**
-2. Fill in:
-   | Column | Value |
-   |--------|-------|
-   | `batch_id` | UUID of the batch |
-   | `title` | "Cell Biology — Chapter Test 1" |
-   | `type` | `chapter_test` / `full_mock` / `dpp` |
-   | `chapter_id` | UUID of the chapter (optional) |
-   | `duration_minutes` | e.g. `60` |
-   | `total_marks` | e.g. `360` |
-   | `marks_correct` | `4` |
-   | `marks_wrong` | `-1` |
-   | `is_active` | `false` (keep off until questions are ready) |
-3. Copy the UUID of the just-created row.
-
-**Step 2** — Run the extract script (open a new terminal):
-```powershell
-npx ts-node --project tsconfig.scripts.json scripts/extract-questions.ts `
-  --file "C:\Users\priya\Downloads\cell-bio-questions.pdf" `
-  --test-id YOUR-TEST-UUID-HERE
-```
-
-**Step 3** — Activate the test:
-- Table Editor → `tests` → find your test → set `is_active = true`
-- Students will now see the test in `/tests`
-
----
-
-### Method B — Extract from a PDF already in Supabase Storage
-
-If you uploaded your question PDF to the `study-material-bucket` bucket (or any bucket), run:
+**After deploy, smoke test:**
 
 ```powershell
-npx ts-node --project tsconfig.scripts.json scripts/extract-questions.ts `
-  --storage-path "study-material-bucket/test-questions/cell-bio-test.pdf" `
-  --test-id YOUR-TEST-UUID-HERE
+Invoke-RestMethod https://YOUR-APP.vercel.app/api/health
+# Expect: status ok, db true, storage true
 ```
+
+Then: `/admin` (coach login) and `/login` (student login).
 
 ---
 
-## PDF Format for Question Extraction
+## Coach workflow (admin panel)
 
-Your question PDF must follow this exact format:
+Log in at **`/admin`**. Recommended setup order:
+
+1. **Batches** — create e.g. `NEET 2027`, set `end_date` (May 2, 2027) for student exam countdown
+2. **Chapters** — add syllabus per batch; **lock** chapters not yet released
+3. **Students** — create accounts (email + temp password + batch)
+4. **Materials** — upload PDFs (notes, mindmaps, PYQs, formula sheets)
+5. **Tests** — create test, upload question PDF, run extraction, activate
+6. **Announcements** — batch-wide or per-batch; high priority shows as dashboard banner
+7. **Settings** — change admin password (updates DB; no redeploy needed)
+
+### Admin routes
+
+| Route | Purpose |
+|-------|---------|
+| `/admin` | Coach login |
+| `/admin/materials` | Upload / archive study PDFs |
+| `/admin/tests` | Create tests, extract questions from PDF |
+| `/admin/students` | Enroll students, reset passwords |
+| `/admin/batches` | Manage batches + batch dashboard |
+| `/admin/chapters` | Chapters per batch, lock/unlock |
+| `/admin/announcements` | In-app notifications |
+| `/admin/activity` | Audit log |
+| `/admin/archive` | Soft-deleted materials, tests, students |
+| `/admin/settings` | Change password, system health |
+
+---
+
+## Student routes
+
+| Route | Status |
+|-------|--------|
+| `/login` | Student sign-in |
+| `/dashboard` | Progress summary, exam countdown, announcements |
+| `/materials` | PDF viewer (locked chapters hidden) |
+| `/tests` | Active tests for student's batch |
+| `/tests/[id]` | Timed test — auto-save, mark for review |
+| `/tests/[id]/result` | Score, analysis, printable report |
+| `/progress` | Score trends, test history |
+| `/error-book` | Wrong answers auto-captured from tests |
+| `/lectures` | Coming soon |
+| `/doubts` | Coming soon |
+| `/schedule` | Coming soon |
+
+---
+
+## Adding tests (PDF format)
+
+Create the test in **Admin → Tests**, then upload a question PDF. The admin UI runs extraction automatically. You can also use the CLI:
+
+```powershell
+node .\node_modules\ts-node\dist\bin.js --project tsconfig.scripts.json scripts/extract-questions.ts `
+  --file "C:\path\to\questions.pdf" `
+  --test-id YOUR-TEST-UUID
+```
+
+**Required PDF format:**
 
 ```
 Q1. What is the powerhouse of the cell?
@@ -125,119 +188,48 @@ D) Uracil
 Answer: C
 ```
 
-- Questions are labelled Q1., Q2., Q3. etc.
-- Options use A) B) C) D) or A. B. C. D. — both work
-- Answer: must be a single letter A/B/C/D
-- Explanation: is optional
-- Leave a blank line between questions
+- Labels: `Q1.`, `Q2.`, …
+- Options: `A)` / `A.` style
+- `Answer:` single letter A–D
+- `Explanation:` optional; blank line between questions
 
 ---
 
-## How to Enroll Students
+## NCERT Biology syllabus (reference)
 
-1. Supabase → **Authentication → Users → Add user**
-2. Enter their **email** and a temporary password
-3. Check **"Email confirm": Skip** (or use `email_confirm: true` via CLI)
-4. After they sign in, go to **Table Editor → profiles** and set:
-   - `full_name` — student's name
-   - `batch_id` — UUID of their batch
+Use **Admin → Chapters** to add these, or paste into Supabase if needed.
 
-Or use the API: `POST /api/admin/create-student` with body:
-```json
-{ "email": "...", "full_name": "...", "batch_id": "...", "password": "..." }
-```
+**Class XI (22):** The Living World, Biological Classification, Plant Kingdom, Animal Kingdom, Morphology of Flowering Plants, Anatomy of Flowering Plants, Structural Organisation in Animals, Cell: The Unit of Life, Biomolecules, Cell Cycle and Cell Division, Transport in Plants, Mineral Nutrition, Photosynthesis in Higher Plants, Respiration in Plants, Plant Growth and Development, Digestion and Absorption, Breathing and Exchange of Gases, Body Fluids and Circulation, Excretory Products and their Elimination, Locomotion and Movement, Neural Control and Coordination, Chemical Coordination and Integration
+
+**Class XII (14):** Sexual Reproduction in Flowering Plants, Human Reproduction, Reproductive Health, Principles of Inheritance and Variation, Molecular Basis of Inheritance, Evolution, Human Health and Disease, Microbes in Human Welfare, Biotechnology: Principles and Processes, Biotechnology and its Applications, Organisms and Populations, Ecosystem, Biodiversity and Conservation, Environmental Issues
 
 ---
 
-## Setting Up Batches & Chapters
+## Scripts
 
-Use **Admin → Batches** to create a batch (e.g. NEET 2027), set the **NEET exam date** (`end_date` drives the student countdown), and open the batch dashboard for a quick overview.
-
-Use **Admin → Chapters** to add syllabus chapters per batch and **lock** chapters you have not released yet (locked = hidden from students).
-
-Alternatively, in Supabase Table Editor:
-
-**batches** table:
-```
-name: "NEET 2027"
-start_date: 2026-06-01
-end_date: 2027-05-02
-is_active: true
-```
-
-**chapters** table (or copy from NCERT syllabus below):
-```
-name: "The Living World"
-class_level: XI
-order_index: 1
-batch_id: <your-batch-uuid>
-is_locked: false
-```
-
-### Full NCERT Biology Syllabus (copy-paste into chapters table)
-
-**Class XI (22 chapters):**
-1. The Living World
-2. Biological Classification
-3. Plant Kingdom
-4. Animal Kingdom
-5. Morphology of Flowering Plants
-6. Anatomy of Flowering Plants
-7. Structural Organisation in Animals
-8. Cell: The Unit of Life
-9. Biomolecules
-10. Cell Cycle and Cell Division
-11. Transport in Plants
-12. Mineral Nutrition
-13. Photosynthesis in Higher Plants
-14. Respiration in Plants
-15. Plant Growth and Development
-16. Digestion and Absorption
-17. Breathing and Exchange of Gases
-18. Body Fluids and Circulation
-19. Excretory Products and their Elimination
-20. Locomotion and Movement
-21. Neural Control and Coordination
-22. Chemical Coordination and Integration
-
-**Class XII (14 chapters):**
-1. Sexual Reproduction in Flowering Plants
-2. Human Reproduction
-3. Reproductive Health
-4. Principles of Inheritance and Variation
-5. Molecular Basis of Inheritance
-6. Evolution
-7. Human Health and Disease
-8. Microbes in Human Welfare
-9. Biotechnology: Principles and Processes
-10. Biotechnology and its Applications
-11. Organisms and Populations
-12. Ecosystem
-13. Biodiversity and Conservation
-14. Environmental Issues
+| Command | Purpose |
+|---------|---------|
+| `npm run build` | Production build |
+| `npm test` | Run Vitest (19 tests) |
+| `npm run extract-questions` | CLI question extraction from PDF |
+| `npm run extract-questions-docx` | Extract from Word doc |
+| `npm run restore-backup` | Restore from Supabase storage backup |
 
 ---
 
-## Application Routes
+## Troubleshooting
 
-| Route | What students see |
-|-------|-------------------|
-| `/login` | Login page |
-| `/dashboard` | Overview: score, syllabus progress, schedule |
-| `/materials` | Browse & view all PDFs with full in-browser viewer |
-| `/tests` | List of all active tests for their batch |
-| `/tests/[id]` | Take the test — timer, auto-save, mark for review |
-| `/tests/[id]/result` | Score, chapter breakdown, question review |
-| `/progress` | Score trend, test history |
-| `/lectures` | Coming Soon |
-| `/doubts` | Coming Soon |
-| `/schedule` | Coming Soon |
+| Problem | Fix |
+|---------|-----|
+| Admin login ignores new Vercel email/password | Login uses `admin_users` table — update via SQL or Settings |
+| `coach@…` works but `mentor@…` doesn't | `update admin_users set email = 'mentor@…'` or delete row and re-bootstrap |
+| Health check `storage: false` | Create `study-material-bucket` (private) |
+| Health check `db: false` | Check Supabase keys; run migration 005 |
+| Announcements / bell not working | Run migration `007_batch_control.sql` |
+| Student signup "Database error" | Run `006_repair_dropped_tables.sql` (fixes `handle_new_user` trigger) |
 
-## Deploy to Vercel
+---
 
-1. Push this folder to GitHub
-2. Vercel → New Project → Import from GitHub
-3. Add environment variables:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-4. Deploy — done
+## Stack
+
+Next.js 16 · React 19 · Supabase (Auth, Postgres, Storage) · TypeScript · Vitest
