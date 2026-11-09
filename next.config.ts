@@ -6,6 +6,8 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "50mb",
     },
   },
+  // Keep native PDF/canvas packages out of the Next bundler (needed on Vercel).
+  serverExternalPackages: ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas"],
   turbopack: {
     resolveAlias: {
       canvas: "./node_modules/canvas/build/Release/canvas.node",

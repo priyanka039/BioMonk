@@ -672,6 +672,10 @@ function parseInlineAnswerKeyQuestions(fullText: string): {
 
 // ─── PDF text extraction (dynamic import → Node-only, bundler-safe) ──
 export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
+    // Worker/CanvasFactory MUST load before pdf-parse so Node gets DOMMatrix polyfills.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const workerMod = (await import("pdf-parse/worker")) as any;
+    const CanvasFactory = workerMod?.CanvasFactory;
     const mod: unknown = await import("pdf-parse");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const pdfMod = mod as any;
@@ -679,7 +683,10 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
     if (typeof pdfMod?.PDFParse === "function") {
         // Fresh copy: pdf-parse v2 may transfer ownership of TypedArrays to a worker.
         const uint8 = Uint8Array.from(buffer);
-        const parser = new pdfMod.PDFParse({ data: uint8 });
+        const parser = new pdfMod.PDFParse({
+            data: uint8,
+            ...(CanvasFactory ? { CanvasFactory } : {}),
+        });
         const out = await parser.getText();
         const text =
             typeof out === "string"
