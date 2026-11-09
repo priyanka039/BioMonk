@@ -677,8 +677,9 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
     const pdfMod = mod as any;
 
     if (typeof pdfMod?.PDFParse === "function") {
-        const uint8 = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-        const parser = new pdfMod.PDFParse(uint8);
+        // Fresh copy: pdf-parse v2 may transfer ownership of TypedArrays to a worker.
+        const uint8 = Uint8Array.from(buffer);
+        const parser = new pdfMod.PDFParse({ data: uint8 });
         const out = await parser.getText();
         const text =
             typeof out === "string"

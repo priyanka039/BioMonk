@@ -415,7 +415,13 @@ export async function extractTestQuestions(
         if (msg === "NOT_AUTHENTICATED") {
             return { success: false, error: "Your session expired. Please sign in again." };
         }
-        return { success: false, error: "Unexpected error during extraction. Nothing was saved." };
+        const detail = msg.replace(/\s+/g, " ").trim().slice(0, 180);
+        return {
+            success: false,
+            error: detail
+                ? `Unexpected error during extraction. Nothing was saved. (${detail})`
+                : "Unexpected error during extraction. Nothing was saved.",
+        };
     }
 }
 
