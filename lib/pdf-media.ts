@@ -117,9 +117,10 @@ export async function attachQuestionMedia(params: {
     let parser: { getScreenshot: Function; getImage: Function; destroy?: Function } | null =
         null;
     try {
-        parser = await loadPdfParser(pdfBuffer);
+        const loaded = await loadPdfParser(pdfBuffer);
+        parser = loaded;
 
-        const shots = await parser.getScreenshot({
+        const shots = await loaded.getScreenshot({
             scale: 1.25,
             imageBuffer: true,
             imageDataUrl: false,
@@ -154,7 +155,7 @@ export async function attachQuestionMedia(params: {
         // Embedded images (optional enrichment for option slots).
         let embeds: Uint8Array[] = [];
         try {
-            const imgRes = await parser.getImage({
+            const imgRes = await loaded.getImage({
                 imageThreshold: 40,
                 imageBuffer: true,
                 imageDataUrl: false,

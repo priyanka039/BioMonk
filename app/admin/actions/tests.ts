@@ -609,7 +609,9 @@ export async function uploadQuestionMedia(
         const supa = getAdminClient();
         const { data: q } = await supa
             .from("questions")
-            .select("id, test_id, order_index, test_version_id, " + Object.values(SLOT_COLUMN).join(", "))
+            .select(
+                "id, test_id, order_index, test_version_id, question_image_path, option_a_image_path, option_b_image_path, option_c_image_path, option_d_image_path"
+            )
             .eq("id", questionId)
             .maybeSingle();
         if (!q) return fail("Question not found.");
@@ -642,7 +644,7 @@ export async function uploadQuestionMedia(
         });
         if (upErr) return fail(`Upload failed: ${upErr.message}`);
 
-        const oldPath = (q as Record<string, unknown>)[col] as string | null;
+        const oldPath = (q as Record<string, string | null>)[col] ?? null;
         const { error } = await supa
             .from("questions")
             .update({ [col]: path })
@@ -656,7 +658,7 @@ export async function uploadQuestionMedia(
         await writeAudit("update", "questions", questionId, { field: col, path });
         revalidatePath("/admin/tests");
         revalidatePath(`/tests/${q.test_id}`);
-        return ok({ path });
+        return ok();
     });
 }
 
@@ -670,11 +672,13 @@ export async function clearQuestionMedia(
         const supa = getAdminClient();
         const { data: q } = await supa
             .from("questions")
-            .select(`id, test_id, ${col}`)
+            .select(
+                "id, test_id, question_image_path, option_a_image_path, option_b_image_path, option_c_image_path, option_d_image_path"
+            )
             .eq("id", questionId)
             .maybeSingle();
         if (!q) return fail("Question not found.");
-        const oldPath = (q as Record<string, unknown>)[col] as string | null;
+        const oldPath = (q as Record<string, string | null>)[col] ?? null;
         const { error } = await supa
             .from("questions")
             .update({ [col]: null })
