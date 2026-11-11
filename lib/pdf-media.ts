@@ -1,11 +1,21 @@
 /**
  * Auto-attach question/option images from PDF screenshots + embedded images.
  * Uses pdf-parse CanvasFactory (Node) and @napi-rs/canvas for crops.
+ *
+ * Strategy (conservative — avoids broken table slices into A/B/C/D):
+ * 1. When text is missing / truncated / table-like → crop the FULL question band as stem image
+ * 2. Per-option images ONLY when the stem clearly asks for figures AND embedded images exist
+ * 3. Never blindly slice a 2×2 screenshot grid into options
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type { ParsedQuestion } from "@/lib/parser";
-import { mediaSlotsNeeded, type MediaSlot } from "@/lib/question-media";
+import {
+    mediaSlotsNeeded,
+    shouldAttachOptionImages,
+    shouldUseFullQuestionShot,
+    type MediaSlot,
+} from "@/lib/question-media";
 import { STORAGE_BUCKET } from "@/lib/admin-supabase";
 import { log } from "@/lib/logger";
 
@@ -80,14 +90,18 @@ function slotPath(
     orderIndex: number,
     slot: MediaSlot
 ): string {
-    const name =
-        slot === "stem" ? "stem.png" : `opt_${slot}.png`;
+    const name = slot === "stem" ? "stem.png" : `opt_${slot}.png`;
     return `tests/${testId}/v${version}/q${orderIndex}/${name}`;
 }
 
+function isLikelyDiagramEmbed(bytes: Uint8Array): boolean {
+    // Skip tiny icons / bullets; keep real diagrams.
+    return bytes.length >= 2500;
+}
+
 /**
- * For questions missing text, crop page screenshots into stem + option regions
- * and map embedded images when available.
+ * For questions missing text, attach a full question-band screenshot as the stem image.
+ * Option images only when figure-options + embedded images are available.
  */
 export async function attachQuestionMedia(params: {
     pdfBuffer: Buffer;
@@ -121,7 +135,7 @@ export async function attachQuestionMedia(params: {
         parser = loaded;
 
         const shots = await loaded.getScreenshot({
-            scale: 1.25,
+            scale: 1.35,
             imageBuffer: true,
             imageDataUrl: false,
         });
@@ -146,23 +160,22 @@ export async function attachQuestionMedia(params: {
                 })
             )
             .sort(
-                (
-                    a: { pageNumber: number },
-                    b: { pageNumber: number }
-                ) => a.pageNumber - b.pageNumber
+                (a: { pageNumber: number }, b: { pageNumber: number }) =>
+                    a.pageNumber - b.pageNumber
             );
 
-        // Embedded images (optional enrichment for option slots).
-        let embeds: Uint8Array[] = [];
+        const embeds: Uint8Array[] = [];
         try {
             const imgRes = await loaded.getImage({
-                imageThreshold: 40,
+                imageThreshold: 80,
                 imageBuffer: true,
                 imageDataUrl: false,
             });
             for (const page of imgRes?.pages || []) {
                 for (const im of page.images || []) {
-                    if (im?.data?.length) embeds.push(im.data);
+                    if (im?.data?.length && isLikelyDiagramEmbed(im.data)) {
+                        embeds.push(im.data);
+                    }
                 }
             }
         } catch (e) {
@@ -188,8 +201,9 @@ export async function attachQuestionMedia(params: {
             if (count === 0) continue;
 
             const bandH = page.height / count;
-            const marginX = Math.floor(page.width * 0.04);
+            const marginX = Math.floor(page.width * 0.03);
             const usableW = page.width - marginX * 2;
+            const padY = Math.max(4, Math.floor(bandH * 0.02));
 
             for (let j = 0; j < count; j++) {
                 const qi = startQ + j;
@@ -198,22 +212,18 @@ export async function attachQuestionMedia(params: {
                 if (slots.length === 0) continue;
 
                 const bandY = j * bandH;
-                const stemH = Math.floor(bandH * 0.55);
-                const optTop = bandY + stemH;
-                const optH = Math.max(8, page.height - optTop - (j === count - 1 ? 4 : 0));
-                // Prefer remaining band height for options.
-                const optBandH = Math.max(8, bandH - stemH);
-
                 const paths = media[qi];
+                const wantFull = shouldUseFullQuestionShot(q) || slots.includes("stem");
 
-                if (slots.includes("stem")) {
+                // Always prefer a full question-band screenshot when media is needed.
+                if (wantFull) {
                     try {
                         const stemBuf = await cropPng(
                             page.data,
                             marginX,
-                            bandY + 4,
+                            bandY + padY,
                             usableW,
-                            Math.max(8, stemH - 8)
+                            Math.max(24, bandH - padY * 2)
                         );
                         const path = slotPath(testId, versionNumber, qi + 1, "stem");
                         if (await uploadPng(supa, path, stemBuf)) {
@@ -229,41 +239,26 @@ export async function attachQuestionMedia(params: {
                     }
                 }
 
+                // Per-option images: embeds only, and only for clear figure-option stems.
                 const optSlots = (["a", "b", "c", "d"] as const).filter((s) =>
                     slots.includes(s)
                 );
-                if (optSlots.length === 0) continue;
-
-                // 2×2 option grid in lower band (typical NEET layout).
-                const cellW = Math.floor(usableW / 2);
-                const cellH = Math.floor(optBandH / 2);
-                const grid: Record<"a" | "b" | "c" | "d", { x: number; y: number }> = {
-                    a: { x: marginX, y: optTop },
-                    b: { x: marginX + cellW, y: optTop },
-                    c: { x: marginX, y: optTop + cellH },
-                    d: { x: marginX + cellW, y: optTop + cellH },
-                };
+                if (
+                    optSlots.length === 0 ||
+                    !shouldAttachOptionImages(q) ||
+                    embedIdx >= embeds.length
+                ) {
+                    continue;
+                }
 
                 let anyOpt = false;
                 for (const slot of optSlots) {
+                    if (embedIdx >= embeds.length) break;
                     try {
-                        let bytes: Buffer | null = null;
-                        // Prefer next embedded image if large enough; else crop grid cell.
-                        if (embedIdx < embeds.length && embeds[embedIdx].length > 800) {
-                            bytes = Buffer.from(embeds[embedIdx]);
-                            embedIdx++;
-                        } else {
-                            const g = grid[slot];
-                            bytes = await cropPng(
-                                page.data,
-                                g.x + 2,
-                                g.y + 2,
-                                Math.max(8, cellW - 4),
-                                Math.max(8, Math.min(cellH - 4, optH))
-                            );
-                        }
+                        const bytes = Buffer.from(embeds[embedIdx]);
+                        embedIdx++;
                         const path = slotPath(testId, versionNumber, qi + 1, slot);
-                        if (bytes && (await uploadPng(supa, path, bytes))) {
+                        if (await uploadPng(supa, path, bytes)) {
                             const key =
                                 `option_${slot}_image_path` as keyof QuestionMediaPaths;
                             (paths as Record<string, string>)[key] = path;
@@ -271,7 +266,7 @@ export async function attachQuestionMedia(params: {
                             anyOpt = true;
                         }
                     } catch (e) {
-                        log.warn("pdf.media.option_crop_failed", {
+                        log.warn("pdf.media.option_embed_failed", {
                             qi,
                             slot,
                             error: e instanceof Error ? e.message : String(e),
@@ -302,7 +297,6 @@ export async function removeStoragePaths(
     paths: string[]
 ): Promise<void> {
     if (!paths.length) return;
-    // Supabase remove accepts batches; chunk to be safe.
     for (let i = 0; i < paths.length; i += 50) {
         const chunk = paths.slice(i, i + 50);
         await supa.storage.from(STORAGE_BUCKET).remove(chunk).then(

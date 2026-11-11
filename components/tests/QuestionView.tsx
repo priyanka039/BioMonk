@@ -103,7 +103,8 @@ export default function QuestionView({
                 {OPTIONS.map((opt) => {
                     const raw = question[OPTION_TEXT[opt]] as string;
                     const imgPath = question[OPTION_IMAGE[opt]] as string | null | undefined;
-                    const text = displayOptionText(raw, !!imgPath);
+                    // Full stem screenshots often include the option table/figures.
+                    const text = displayOptionText(raw, !!imgPath, !!stemImage);
                     const isSelected = selected === opt;
                     const isCorrect = reviewMode && question.correct_option === opt;
                     const isWrong = reviewMode && isSelected && !isCorrect;
