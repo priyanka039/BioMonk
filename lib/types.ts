@@ -83,6 +83,11 @@ export interface Question {
     correct_option: "A" | "B" | "C" | "D";
     explanation: string | null;
     order_index: number;
+    question_image_path?: string | null;
+    option_a_image_path?: string | null;
+    option_b_image_path?: string | null;
+    option_c_image_path?: string | null;
+    option_d_image_path?: string | null;
 }
 
 export interface TestAttempt {

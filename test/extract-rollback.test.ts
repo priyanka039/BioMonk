@@ -95,6 +95,18 @@ vi.mock("@/lib/admin-supabase", () => ({
 vi.mock("@/lib/parser", () => ({
     parsePdf: vi.fn(async () => ({ questions: h.state.parseQuestions, report: h.state.parseReport })),
 }));
+vi.mock("@/lib/pdf-media", () => ({
+    attachQuestionMedia: vi.fn(async () => ({
+        media: [],
+        stats: {
+            withStemImage: 0,
+            withOptionImages: 0,
+            placeholderOptions: 0,
+            uploadedPaths: [],
+        },
+    })),
+    removeStoragePaths: vi.fn(async () => {}),
+}));
 
 import { extractTestQuestions } from "@/app/admin/actions/tests";
 

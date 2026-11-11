@@ -12,6 +12,8 @@
  * a simple report (format, extracted, failed, unmatched, durationMs, rawOutput).
  */
 
+import { isPlaceholderOption, isPlaceholderStem } from "@/lib/question-media";
+
 export interface ParsedQuestion {
     question_number: number;
     question_text: string;
@@ -29,6 +31,12 @@ export interface ExtractionReport {
     unmatched: number[];
     durationMs: number;
     rawOutput: string;
+    /** Questions with at least one placeholder option (need media). */
+    placeholderOptions?: number;
+    /** Questions whose stem looks like a figure placeholder. */
+    needsStemMedia?: number;
+    withStemImage?: number;
+    withOptionImages?: number;
 }
 
 export interface ParseResult {
@@ -278,13 +286,19 @@ function parseQuestions(questionSection: string): {
     function extractOptionsFallback(blockText: string): Partial<Record<1 | 2 | 3 | 4, string>> {
         const s = normalizeText(blockText);
         const out: Partial<Record<1 | 2 | 3 | 4, string>> = {};
-        const markerRe = /(?:^|\n|\s)(?:\(\s*([1-4])\s*\)|([1-4])\s*\))\s*/g;
+        // (1) / 1) / A) / (A) markers — same-line multi-column common in NEET PDFs.
+        const markerRe =
+            /(?:^|\n|\s)(?:\(\s*([1-4A-Da-d])\s*\)|([1-4A-Da-d])\s*[\)\.])\s*/g;
         const hits: { n: 1 | 2 | 3 | 4; i: number; len: number }[] = [];
         let m: RegExpExecArray | null;
         while ((m = markerRe.exec(s))) {
-            const raw = (m[1] || m[2]) ?? "";
-            const n = Number(raw) as 1 | 2 | 3 | 4;
-            if (n >= 1 && n <= 4) hits.push({ n, i: m.index, len: m[0].length });
+            const raw = (m[1] || m[2] || "").toUpperCase();
+            let n: 1 | 2 | 3 | 4 | null = null;
+            if (raw === "1" || raw === "A") n = 1;
+            else if (raw === "2" || raw === "B") n = 2;
+            else if (raw === "3" || raw === "C") n = 3;
+            else if (raw === "4" || raw === "D") n = 4;
+            if (n) hits.push({ n, i: m.index, len: m[0].length });
         }
         if (hits.length === 0) return out;
         for (let idx = 0; idx < hits.length; idx++) {
@@ -293,7 +307,7 @@ function parseQuestions(questionSection: string): {
             const start = cur.i + cur.len;
             const end = next ? next.i : s.length;
             const chunk = compactSpaces(s.slice(start, end));
-            if (chunk) out[cur.n] = chunk;
+            if (chunk && !out[cur.n]) out[cur.n] = chunk;
         }
         return out;
     }
@@ -574,7 +588,14 @@ function parseInlineAnswerKeyQuestions(fullText: string): {
     if (answers.length === 0) return { questions, failedBlocks };
 
     function splitOptLine(line: string): string[] {
-        const parts = line.split(/\t|\s{3,}/).map((p) => p.trim()).filter(Boolean);
+        // Tabs / wide gaps first; then two labelled options on one line: "(1) … (2) …"
+        const labelled = line.match(
+            /(?:\(\s*[1-4A-Da-d]\s*\)|[1-4A-Da-d]\s*[\)\.])\s*.+?(?=(?:\(\s*[1-4A-Da-d]\s*\)|[1-4A-Da-d]\s*[\)\.])|$)/g
+        );
+        if (labelled && labelled.length >= 2) {
+            return labelled.map((p) => p.trim()).filter(Boolean).slice(0, 2);
+        }
+        const parts = line.split(/\t|\s{2,}/).map((p) => p.trim()).filter(Boolean);
         return parts.length >= 2 ? parts.slice(0, 2) : [line];
     }
 
@@ -801,6 +822,16 @@ export async function parsePdf(buffer: Buffer): Promise<ParseResult> {
     const t0 = Date.now();
     const text = await extractTextFromPdf(buffer);
     const r = parseText(text);
+
+    let placeholderOptions = 0;
+    let needsStemMedia = 0;
+    for (const q of r.questions) {
+        if (isPlaceholderStem(q.question_text)) needsStemMedia++;
+        for (const opt of [q.option_a, q.option_b, q.option_c, q.option_d]) {
+            if (isPlaceholderOption(opt)) placeholderOptions++;
+        }
+    }
+
     const report: ExtractionReport = {
         format: r.format,
         extracted: r.questions.length,
@@ -808,6 +839,8 @@ export async function parsePdf(buffer: Buffer): Promise<ParseResult> {
         unmatched: r.unmatched,
         durationMs: Date.now() - t0,
         rawOutput: buildRawOutput(r, (text || "").length),
+        placeholderOptions,
+        needsStemMedia,
     };
     return { questions: r.questions, report };
 }

@@ -8,6 +8,7 @@ import ConfirmModal from "@/components/admin/ConfirmModal";
 import SubmitButton from "@/components/admin/SubmitButton";
 import FormField from "@/components/admin/FormField";
 import Pagination from "@/components/admin/Pagination";
+import QuestionMediaReview from "@/components/admin/QuestionMediaReview";
 import {
     getTests,
     createTest,
@@ -59,6 +60,7 @@ export default function TestsAdminClient({
     const extractFileRef = useRef<HTMLInputElement>(null);
 
     const [archiveTarget, setArchiveTarget] = useState<TestRow | null>(null);
+    const [reviewTarget, setReviewTarget] = useState<TestRow | null>(null);
 
     // ── Autosave the create form to localStorage ──
     useEffect(() => {
@@ -221,6 +223,15 @@ export default function TestsAdminClient({
                                         >
                                             {t.question_count ? "Re-extract" : "Upload PDF"}
                                         </button>
+                                        {t.question_count > 0 && (
+                                            <button
+                                                className="btn btn-ghost"
+                                                style={miniBtn}
+                                                onClick={() => setReviewTarget(t)}
+                                            >
+                                                Review media
+                                            </button>
+                                        )}
                                         <ToggleButton test={t} onDone={(m) => { setAlert(m); refresh(); }} />
                                         <button
                                             className="btn btn-ghost"
@@ -356,14 +367,45 @@ export default function TestsAdminClient({
                                 No answer for: {extractReport.unmatched.map((n) => `Q${n}`).join(", ")}
                             </div>
                         )}
+                        {(extractReport.withStemImage || extractReport.withOptionImages || extractReport.placeholderOptions) ? (
+                            <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: 6 }}>
+                                Media: {extractReport.withStemImage ?? 0} stem image
+                                {extractReport.withStemImage === 1 ? "" : "s"},{" "}
+                                {extractReport.withOptionImages ?? 0} option image
+                                {(extractReport.withOptionImages ?? 0) === 1 ? "" : "s"}
+                                {(extractReport.placeholderOptions ?? 0) > 0
+                                    ? ` · ${extractReport.placeholderOptions} placeholder option(s)`
+                                    : ""}
+                            </div>
+                        ) : null}
                     </div>
                 )}
 
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 4 }}>
                     <button className="btn btn-ghost" onClick={() => setExtractTarget(null)}>Close</button>
+                    {extractReport && extractTarget && (
+                        <button
+                            className="btn btn-ghost"
+                            onClick={() => {
+                                setReviewTarget(extractTarget);
+                                setExtractTarget(null);
+                            }}
+                        >
+                            Review media
+                        </button>
+                    )}
                     <SubmitButton onClick={doExtract}>Extract</SubmitButton>
                 </div>
             </Modal>
+
+            {reviewTarget && (
+                <QuestionMediaReview
+                    testId={reviewTarget.id}
+                    testTitle={reviewTarget.title}
+                    open={!!reviewTarget}
+                    onClose={() => setReviewTarget(null)}
+                />
+            )}
 
             {/* Archive */}
             <ConfirmModal

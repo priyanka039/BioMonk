@@ -169,6 +169,8 @@ node .\node_modules\ts-node\dist\bin.js --project tsconfig.scripts.json scripts/
   --test-id YOUR-TEST-UUID
 ```
 
+After deploy, run migration `008_question_media.sql` (adds `question_image_path` / `option_*_image_path`). **Re-extract** existing tests so diagrams/tables get screenshots. Images live in the private study-material bucket under `tests/{testId}/v{version}/q…`. Use **Review media** in Admin to upload or replace stem/option images when auto-crop misses.
+
 **Required PDF format:**
 
 ```
@@ -192,6 +194,7 @@ Answer: C
 - Options: `A)` / `A.` style
 - `Answer:` single letter A–D
 - `Explanation:` optional; blank line between questions
+- Tables / figures: text may be incomplete; extraction attaches page crops when options or stems lack real text
 
 ---
 
@@ -210,7 +213,7 @@ Use **Admin → Chapters** to add these, or paste into Supabase if needed.
 | Command | Purpose |
 |---------|---------|
 | `npm run build` | Production build |
-| `npm test` | Run Vitest (19 tests) |
+| `npm test` | Run Vitest |
 | `npm run extract-questions` | CLI question extraction from PDF |
 | `npm run extract-questions-docx` | Extract from Word doc |
 | `npm run restore-backup` | Restore from Supabase storage backup |

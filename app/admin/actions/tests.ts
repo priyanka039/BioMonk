@@ -7,6 +7,7 @@ import { assertAdmin } from "@/lib/admin-auth";
 import { writeAudit } from "@/lib/audit";
 import { log } from "@/lib/logger";
 import { parsePdf } from "@/lib/parser";
+import { attachQuestionMedia, removeStoragePaths } from "@/lib/pdf-media";
 import { ok, fail, run, pageRange, type ActionResult } from "./_helpers";
 
 const MAX_SIZE = 50 * 1024 * 1024;
@@ -226,6 +227,10 @@ export interface ExtractResult {
         extracted: number;
         failed: { num: number; reason: string }[];
         unmatched: number[];
+        placeholderOptions?: number;
+        needsStemMedia?: number;
+        withStemImage?: number;
+        withOptionImages?: number;
     };
 }
 
@@ -238,6 +243,7 @@ export async function extractTestQuestions(
     let lockAcquired = false;
     let uploadedPath: string | null = null;
     let versionId: string | null = null;
+    let mediaPaths: string[] = [];
     const supa = getAdminClient();
 
     async function clearLock() {
@@ -346,6 +352,19 @@ export async function extractTestQuestions(
         }
         versionId = version.id;
 
+        // ── Auto media (screenshots / option crops) — best-effort ──
+        const { media, stats: mediaStats } = await attachQuestionMedia({
+            pdfBuffer: bytes,
+            questions: valid,
+            testId,
+            versionNumber: nextVersion,
+            supa,
+        });
+        mediaPaths = mediaStats.uploadedPaths;
+        report.withStemImage = mediaStats.withStemImage;
+        report.withOptionImages = mediaStats.withOptionImages;
+        report.placeholderOptions = mediaStats.placeholderOptions;
+
         // ── Insert all questions for this version ──
         const rows = valid.map((q, i) => ({
             test_id: testId,
@@ -358,11 +377,18 @@ export async function extractTestQuestions(
             option_d: q.option_d,
             correct_option: q.correct_option,
             explanation: null,
+            question_image_path: media[i]?.question_image_path ?? null,
+            option_a_image_path: media[i]?.option_a_image_path ?? null,
+            option_b_image_path: media[i]?.option_b_image_path ?? null,
+            option_c_image_path: media[i]?.option_c_image_path ?? null,
+            option_d_image_path: media[i]?.option_d_image_path ?? null,
         }));
         const { error: insErr } = await supa.from("questions").insert(rows);
         if (insErr) {
             // Rollback: deleting the version cascades to any inserted questions.
             await supa.from("test_versions").delete().eq("id", version.id);
+            await removeStoragePaths(supa, mediaPaths);
+            mediaPaths = [];
             await supa.storage.from(STORAGE_BUCKET).remove([filePath]);
             uploadedPath = null;
             versionId = null;
@@ -370,6 +396,12 @@ export async function extractTestQuestions(
             log.error("test.extract.insert_failed_rolledback", { testId, error: insErr.message });
             return { success: false, error: `Could not save questions: ${insErr.message}` };
         }
+
+        // Persist media stats on the version report.
+        await supa
+            .from("test_versions")
+            .update({ extraction_report: report })
+            .eq("id", version.id);
 
         // ── Finalize: this version becomes current; sync test row ──
         await supa.from("test_versions").update({ is_current: false }).eq("test_id", testId);
@@ -391,6 +423,8 @@ export async function extractTestQuestions(
             extracted: valid.length,
             format: report.format,
             failed: report.failed.length,
+            withStemImage: mediaStats.withStemImage,
+            withOptionImages: mediaStats.withOptionImages,
             durationMs: Date.now() - t0,
         });
         revalidatePath("/admin/tests");
@@ -398,17 +432,29 @@ export async function extractTestQuestions(
             testId,
             version: nextVersion,
             extracted: valid.length,
+            withStemImage: mediaStats.withStemImage,
+            withOptionImages: mediaStats.withOptionImages,
             durationMs: Date.now() - t0,
         });
 
         return {
             success: true,
-            report: { format: report.format, extracted: valid.length, failed: report.failed, unmatched: report.unmatched },
+            report: {
+                format: report.format,
+                extracted: valid.length,
+                failed: report.failed,
+                unmatched: report.unmatched,
+                placeholderOptions: report.placeholderOptions,
+                needsStemMedia: report.needsStemMedia,
+                withStemImage: mediaStats.withStemImage,
+                withOptionImages: mediaStats.withOptionImages,
+            },
         };
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         // Best-effort cleanup of anything partially created.
         if (versionId) await supa.from("test_versions").delete().eq("id", versionId).then(() => {}, () => {});
+        if (mediaPaths.length) await removeStoragePaths(supa, mediaPaths);
         if (uploadedPath) await supa.storage.from(STORAGE_BUCKET).remove([uploadedPath]).then(() => {}, () => {});
         await clearLock();
         log.error("test.extract.exception", { testId, error: msg });
@@ -500,6 +546,144 @@ export async function restoreTest(id: string): Promise<ActionResult> {
         await writeAudit("restore", "tests", id, {});
         revalidatePath("/admin/tests");
         revalidatePath("/admin/archive");
+        return ok();
+    });
+}
+
+export type QuestionMediaSlot = "stem" | "a" | "b" | "c" | "d";
+
+const SLOT_COLUMN: Record<QuestionMediaSlot, string> = {
+    stem: "question_image_path",
+    a: "option_a_image_path",
+    b: "option_b_image_path",
+    c: "option_c_image_path",
+    d: "option_d_image_path",
+};
+
+export async function getTestQuestionsForReview(testId: string) {
+    return run(async () => {
+        await assertAdmin();
+        const supa = getAdminClient();
+        const { data: cur } = await supa
+            .from("test_versions")
+            .select("id, version_number")
+            .eq("test_id", testId)
+            .eq("is_current", true)
+            .maybeSingle();
+
+        let query = supa
+            .from("questions")
+            .select(
+                "id, order_index, question_text, option_a, option_b, option_c, option_d, correct_option, question_image_path, option_a_image_path, option_b_image_path, option_c_image_path, option_d_image_path, test_version_id"
+            )
+            .eq("test_id", testId)
+            .order("order_index");
+
+        if (cur?.id) query = query.eq("test_version_id", cur.id);
+
+        const { data, error } = await query;
+        if (error) return fail(error.message);
+        return ok({
+            version: cur?.version_number ?? null,
+            questions: data || [],
+        });
+    });
+}
+
+export async function uploadQuestionMedia(
+    questionId: string,
+    slot: QuestionMediaSlot,
+    formData: FormData
+): Promise<ActionResult> {
+    return run(async () => {
+        await assertAdmin();
+        const file = formData.get("file") as File | null;
+        if (!file) return fail("Please choose an image file.");
+        if (file.size === 0) return fail("The file is empty.");
+        if (file.size > 8 * 1024 * 1024) return fail("Image must be under 8 MB.");
+        const mime = file.type || "";
+        if (!/^image\/(png|jpeg|jpg|webp|gif)$/i.test(mime)) {
+            return fail("Only PNG, JPG, WEBP, or GIF images are allowed.");
+        }
+
+        const supa = getAdminClient();
+        const { data: q } = await supa
+            .from("questions")
+            .select("id, test_id, order_index, test_version_id, " + Object.values(SLOT_COLUMN).join(", "))
+            .eq("id", questionId)
+            .maybeSingle();
+        if (!q) return fail("Question not found.");
+
+        let versionNumber = 1;
+        if (q.test_version_id) {
+            const { data: ver } = await supa
+                .from("test_versions")
+                .select("version_number")
+                .eq("id", q.test_version_id)
+                .maybeSingle();
+            versionNumber = ver?.version_number ?? 1;
+        }
+
+        const ext = mime.includes("png")
+            ? "png"
+            : mime.includes("webp")
+              ? "webp"
+              : mime.includes("gif")
+                ? "gif"
+                : "jpg";
+        const col = SLOT_COLUMN[slot];
+        const fileName = slot === "stem" ? `stem.${ext}` : `opt_${slot}.${ext}`;
+        const path = `tests/${q.test_id}/v${versionNumber}/q${q.order_index}/${fileName}`;
+
+        const bytes = Buffer.from(await file.arrayBuffer());
+        const { error: upErr } = await supa.storage.from(STORAGE_BUCKET).upload(path, bytes, {
+            contentType: mime,
+            upsert: true,
+        });
+        if (upErr) return fail(`Upload failed: ${upErr.message}`);
+
+        const oldPath = (q as Record<string, unknown>)[col] as string | null;
+        const { error } = await supa
+            .from("questions")
+            .update({ [col]: path })
+            .eq("id", questionId);
+        if (error) {
+            await removeStoragePaths(supa, [path]);
+            return fail(error.message);
+        }
+        if (oldPath && oldPath !== path) await removeStoragePaths(supa, [oldPath]);
+
+        await writeAudit("update", "questions", questionId, { field: col, path });
+        revalidatePath("/admin/tests");
+        revalidatePath(`/tests/${q.test_id}`);
+        return ok({ path });
+    });
+}
+
+export async function clearQuestionMedia(
+    questionId: string,
+    slot: QuestionMediaSlot
+): Promise<ActionResult> {
+    return run(async () => {
+        await assertAdmin();
+        const col = SLOT_COLUMN[slot];
+        const supa = getAdminClient();
+        const { data: q } = await supa
+            .from("questions")
+            .select(`id, test_id, ${col}`)
+            .eq("id", questionId)
+            .maybeSingle();
+        if (!q) return fail("Question not found.");
+        const oldPath = (q as Record<string, unknown>)[col] as string | null;
+        const { error } = await supa
+            .from("questions")
+            .update({ [col]: null })
+            .eq("id", questionId);
+        if (error) return fail(error.message);
+        if (oldPath) await removeStoragePaths(supa, [oldPath]);
+        await writeAudit("update", "questions", questionId, { field: col, cleared: true });
+        revalidatePath("/admin/tests");
+        revalidatePath(`/tests/${q.test_id}`);
         return ok();
     });
 }

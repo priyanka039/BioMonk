@@ -1,5 +1,9 @@
+"use client";
+
 import { Question, TestResponse } from "@/lib/types";
 import MathText from "@/components/ui/MathText";
+import QuestionMediaImage from "@/components/tests/QuestionMediaImage";
+import { displayOptionText, displayStemText } from "@/lib/question-media";
 
 interface QuestionViewProps {
     question: Question;
@@ -17,6 +21,12 @@ const OPTION_TEXT: Record<"A" | "B" | "C" | "D", keyof Question> = {
     C: "option_c",
     D: "option_d",
 };
+const OPTION_IMAGE: Record<"A" | "B" | "C" | "D", keyof Question> = {
+    A: "option_a_image_path",
+    B: "option_b_image_path",
+    C: "option_c_image_path",
+    D: "option_d_image_path",
+};
 
 export default function QuestionView({
     question,
@@ -27,10 +37,11 @@ export default function QuestionView({
     reviewMode = false,
 }: QuestionViewProps) {
     const selected = response?.selected_option as "A" | "B" | "C" | "D" | null;
+    const stemImage = question.question_image_path;
+    const stemText = displayStemText(question.question_text, !!stemImage);
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-            {/* Question header */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span
@@ -73,7 +84,6 @@ export default function QuestionView({
                 </div>
             </div>
 
-            {/* Question text */}
             <div
                 style={{
                     fontSize: 15.5,
@@ -85,13 +95,15 @@ export default function QuestionView({
                     border: "1px solid var(--border)",
                 }}
             >
-                <MathText text={question.question_text} />
+                {stemText && <MathText text={stemText} />}
+                <QuestionMediaImage path={stemImage} alt={`Question ${questionNumber} diagram`} />
             </div>
 
-            {/* Options */}
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {OPTIONS.map((opt) => {
-                    const text = question[OPTION_TEXT[opt]] as string;
+                    const raw = question[OPTION_TEXT[opt]] as string;
+                    const imgPath = question[OPTION_IMAGE[opt]] as string | null | undefined;
+                    const text = displayOptionText(raw, !!imgPath);
                     const isSelected = selected === opt;
                     const isCorrect = reviewMode && question.correct_option === opt;
                     const isWrong = reviewMode && isSelected && !isCorrect;
@@ -113,9 +125,18 @@ export default function QuestionView({
                             }}
                         >
                             <div className="option-key">{opt}</div>
-                            <p style={{ fontSize: 14.5, color: "var(--text-primary)", lineHeight: 1.5, flex: 1 }}>
-                                <MathText text={text} />
-                            </p>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                {text && (
+                                    <p style={{ fontSize: 14.5, color: "var(--text-primary)", lineHeight: 1.5 }}>
+                                        <MathText text={text} />
+                                    </p>
+                                )}
+                                <QuestionMediaImage
+                                    path={imgPath}
+                                    alt={`Option ${opt}`}
+                                    maxHeight={180}
+                                />
+                            </div>
                             {isCorrect && (
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="2.5">
                                     <polyline points="20 6 9 17 4 12" />
@@ -131,7 +152,6 @@ export default function QuestionView({
                 })}
             </div>
 
-            {/* Explanation in review mode */}
             {reviewMode && question.explanation && (
                 <div
                     style={{

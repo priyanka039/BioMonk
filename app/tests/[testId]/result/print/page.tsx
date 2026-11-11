@@ -1,7 +1,16 @@
 import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase-server";
+import { getAdminClient, STORAGE_BUCKET } from "@/lib/admin-supabase";
+import { displayOptionText, displayStemText } from "@/lib/question-media";
 import type { Metadata } from "next";
 import PrintToolbar from "./PrintToolbar";
+
+async function signPath(path: string | null | undefined): Promise<string | null> {
+  if (!path) return null;
+  const client = getAdminClient();
+  const { data } = await client.storage.from(STORAGE_BUCKET).createSignedUrl(path, 3600);
+  return data?.signedUrl ?? null;
+}
 
 export const metadata: Metadata = {
   title: "Download Result — BioMonk",
@@ -53,6 +62,23 @@ export default async function TestResultPrintPage({ params }: Props) {
 
   const responseMap: Record<string, any> = {};
   for (const r of responses || []) responseMap[r.question_id] = r;
+
+  const mediaUrls: Record<
+    string,
+    { stem: string | null; a: string | null; b: string | null; c: string | null; d: string | null }
+  > = {};
+  await Promise.all(
+    (questions || []).map(async (q: any) => {
+      const [stem, a, b, c, d] = await Promise.all([
+        signPath(q.question_image_path),
+        signPath(q.option_a_image_path),
+        signPath(q.option_b_image_path),
+        signPath(q.option_c_image_path),
+        signPath(q.option_d_image_path),
+      ]);
+      mediaUrls[q.id] = { stem, a, b, c, d };
+    })
+  );
 
   const score = attempt.score ?? 0;
   // Max marks for a test = number of questions * (+4 per correct)
@@ -106,11 +132,20 @@ export default async function TestResultPrintPage({ params }: Props) {
           const selected: string | null = r?.selected_option ?? null;
           const correct: string = q.correct_option;
 
+          const media = mediaUrls[q.id] || { stem: null, a: null, b: null, c: null, d: null };
+          const stemText = displayStemText(String(q.question_text || ""), !!media.stem);
+
           function optText(letter: "A" | "B" | "C" | "D") {
-            return (
+            const raw =
               (letter === "A" ? q.option_a : letter === "B" ? q.option_b : letter === "C" ? q.option_c : q.option_d) ??
-              ""
-            );
+              "";
+            const img =
+              letter === "A" ? media.a : letter === "B" ? media.b : letter === "C" ? media.c : media.d;
+            return displayOptionText(String(raw), !!img);
+          }
+
+          function optImg(letter: "A" | "B" | "C" | "D") {
+            return letter === "A" ? media.a : letter === "B" ? media.b : letter === "C" ? media.c : media.d;
           }
 
           return (
@@ -135,12 +170,29 @@ export default async function TestResultPrintPage({ params }: Props) {
                 </div>
               </div>
 
-              <div
-                style={{ fontSize: 14.5, lineHeight: 1.65, marginBottom: 12 }}
-                dangerouslySetInnerHTML={{
-                  __html: String(q.question_text || "").replace(/\n/g, "<br/>"),
-                }}
-              />
+              {stemText ? (
+                <div
+                  style={{ fontSize: 14.5, lineHeight: 1.65, marginBottom: 12 }}
+                  dangerouslySetInnerHTML={{
+                    __html: String(stemText).replace(/\n/g, "<br/>"),
+                  }}
+                />
+              ) : null}
+              {media.stem ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={media.stem}
+                  alt={`Q${idx + 1} diagram`}
+                  style={{
+                    display: "block",
+                    maxWidth: "100%",
+                    maxHeight: 260,
+                    marginBottom: 12,
+                    borderRadius: 8,
+                    border: "1px solid #e5e7eb",
+                  }}
+                />
+              ) : null}
 
               <div style={{ display: "grid", gap: 8 }}>
                 {(["A", "B", "C", "D"] as const).map((opt) => {
@@ -149,6 +201,8 @@ export default async function TestResultPrintPage({ params }: Props) {
                   const bg = isCorrect ? "#ecfdf5" : isSelected ? "#eff6ff" : "#fff";
                   const border = isCorrect ? "#10b981" : isSelected ? "#3b82f6" : "#e5e7eb";
                   const color = isCorrect ? "#065f46" : isSelected ? "#1e40af" : "#111";
+                  const text = optText(opt);
+                  const img = optImg(opt);
 
                   return (
                     <div
@@ -180,7 +234,27 @@ export default async function TestResultPrintPage({ params }: Props) {
                       >
                         {opt}
                       </div>
-                      <div style={{ fontSize: 13.5, lineHeight: 1.55, color }}>{optText(opt)}</div>
+                      <div style={{ flex: 1 }}>
+                        {text ? (
+                          <div style={{ fontSize: 13.5, lineHeight: 1.55, color }}>{text}</div>
+                        ) : null}
+                        {img ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={img}
+                            alt={`Option ${opt}`}
+                            style={{
+                              display: "block",
+                              maxWidth: "100%",
+                              maxHeight: 140,
+                              marginTop: text ? 6 : 0,
+                              borderRadius: 6,
+                              border: "1px solid #e5e7eb",
+                              background: "#fff",
+                            }}
+                          />
+                        ) : null}
+                      </div>
                     </div>
                   );
                 })}

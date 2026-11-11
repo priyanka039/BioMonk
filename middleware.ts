@@ -8,6 +8,7 @@ export async function middleware(request: NextRequest) {
     // Internal + public API helpers — no auth redirect (they handle their own).
     if (
         pathname.startsWith("/api/storage/resolve-material") ||
+        pathname.startsWith("/api/storage/resolve-path") ||
         pathname.startsWith("/api/health") ||
         pathname.startsWith("/api/cron")
     ) {
